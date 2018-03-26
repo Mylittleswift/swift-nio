@@ -35,6 +35,16 @@ extension ChannelPipelineTest {
                 ("testOutboundNextForInboundOnlyIsCorrect", testOutboundNextForInboundOnlyIsCorrect),
                 ("testChannelInfrastructureIsNotLeaked", testChannelInfrastructureIsNotLeaked),
                 ("testAddingHandlersFirstWorks", testAddingHandlersFirstWorks),
+                ("testAddAfter", testAddAfter),
+                ("testAddBefore", testAddBefore),
+                ("testAddAfterLast", testAddAfterLast),
+                ("testAddBeforeFirst", testAddBeforeFirst),
+                ("testAddAfterWhileClosed", testAddAfterWhileClosed),
+                ("testAddBeforeWhileClosed", testAddBeforeWhileClosed),
+                ("testFindHandlerByType", testFindHandlerByType),
+                ("testFindHandlerByTypeReturnsTheFirstOfItsType", testFindHandlerByTypeReturnsTheFirstOfItsType),
+                ("testContextForHeadOrTail", testContextForHeadOrTail),
+                ("testRemoveHeadOrTail", testRemoveHeadOrTail),
            ]
    }
 }

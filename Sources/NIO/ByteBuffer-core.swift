@@ -114,7 +114,7 @@ private func toIndex(_ value: Int) -> Index {
 ///     buf.set(integer: 17 as Int, at: 11)
 ///     let seventeen: Int = buf.getInteger(at: 11)
 ///
-/// If needed, `ByteBuffer` will automatically resize its storage to accomodate your `set` request.
+/// If needed, `ByteBuffer` will automatically resize its storage to accommodate your `set` request.
 ///
 /// ### Sequential Access
 /// `ByteBuffer` provides two properties which are indices into the `ByteBuffer` to support sequential access:
@@ -514,7 +514,7 @@ public struct ByteBuffer {
         return Int(self._readerIndex)
     }
 
-    /// The write index or the number of bytes previously writte to this `ByteBuffer`. `writerIndex` is `0` for a
+    /// The write index or the number of bytes previously written to this `ByteBuffer`. `writerIndex` is `0` for a
     /// newly allocated `ByteBuffer`.
     public var writerIndex: Int {
         return Int(self._writerIndex)
