@@ -221,7 +221,7 @@ public final class WebSocketFrameDecoder: ByteToMessageDecoder {
     public var cumulationBuffer: ByteBuffer? = nil
 
     /// The maximum frame size the decoder is willing to tolerate from the remote peer.
-    private let maxFrameSize: Int
+    /* private but tests */ let maxFrameSize: Int
 
     /// Our parser state.
     private var parser = WSParser()
@@ -269,6 +269,11 @@ public final class WebSocketFrameDecoder: ByteToMessageDecoder {
         return .needMoreData
     }
 
+    public func decodeLast(ctx: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
+        // EOF is not semantic in WebSocket, so ignore this.
+        return .needMoreData
+    }
+
     /// Apply a number of validations to the incremental state, ensuring that the frame we're
     /// receiving is valid.
     private func validateState() throws {
@@ -307,8 +312,8 @@ public final class WebSocketFrameDecoder: ByteToMessageDecoder {
         let frame = WebSocketFrame(fin: true,
                                    opcode: .connectionClose,
                                    data: data)
-        _ = ctx.write(self.wrapOutboundOut(frame)).then {
-            ctx.close()
+        ctx.writeAndFlush(self.wrapOutboundOut(frame)).whenComplete {
+            ctx.close(promise: nil)
         }
         ctx.fireErrorCaught(error)
     }

@@ -25,7 +25,6 @@ import XCTest
 #if os(Linux) || os(FreeBSD)
    @testable import NIOConcurrencyHelpersTests
    @testable import NIOHTTP1Tests
-   @testable import NIOPriorityQueueTests
    @testable import NIOTLSTests
    @testable import NIOTests
    @testable import NIOWebSocketTests
@@ -37,6 +36,7 @@ import XCTest
          testCase(Base64Test.allTests),
          testCase(BaseObjectTest.allTests),
          testCase(BlockingIOThreadPoolTest.allTests),
+         testCase(BootstrapTest.allTests),
          testCase(ByteBufferTest.allTests),
          testCase(ByteToMessageDecoderTest.allTests),
          testCase(ChannelNotificationTest.allTests),
@@ -44,6 +44,7 @@ import XCTest
          testCase(ChannelTests.allTests),
          testCase(CircularBufferTests.allTests),
          testCase(CompositeErrorTests.allTests),
+         testCase(CustomChannelTests.allTests),
          testCase(DatagramChannelTests.allTests),
          testCase(EchoServerClientTest.allTests),
          testCase(EmbeddedChannelTest.allTests),
@@ -52,17 +53,22 @@ import XCTest
          testCase(EventLoopFutureTest.allTests),
          testCase(EventLoopTest.allTests),
          testCase(FileRegionTest.allTests),
+         testCase(GetaddrinfoResolverTest.allTests),
+         testCase(HTTPDecoderLengthTest.allTests),
+         testCase(HTTPDecoderTest.allTests),
          testCase(HTTPHeadersTest.allTests),
          testCase(HTTPRequestEncoderTests.allTests),
          testCase(HTTPResponseCompressorTest.allTests),
          testCase(HTTPResponseEncoderTests.allTests),
          testCase(HTTPServerClientTest.allTests),
          testCase(HTTPServerPipelineHandlerTest.allTests),
+         testCase(HTTPServerProtocolErrorHandlerTest.allTests),
          testCase(HTTPTest.allTests),
          testCase(HTTPUpgradeTestCase.allTests),
          testCase(HappyEyeballsTest.allTests),
          testCase(HeapTests.allTests),
          testCase(IdleStateHandlerTest.allTests),
+         testCase(IntegerTypesTest.allTests),
          testCase(MarkedCircularBufferTests.allTests),
          testCase(MessageToByteEncoderTest.allTests),
          testCase(NIOConcurrencyHelpersTests.allTests),

@@ -14,7 +14,6 @@
 
 import NIOConcurrencyHelpers
 import Dispatch
-import NIOPriorityQueue
 
 /// Returned once a task was scheduled on the `EventLoop` for later execution.
 ///
@@ -24,7 +23,7 @@ public struct Scheduled<T> {
     private let promise: EventLoopPromise<T>
     private let cancellationTask: () -> Void
 
-    init(promise: EventLoopPromise<T>, cancellationTask: @escaping () -> Void) {
+    public init(promise: EventLoopPromise<T>, cancellationTask: @escaping () -> Void) {
         self.promise = promise
         promise.futureResult.whenFailure { error in
             guard let err = error as? EventLoopError else {
@@ -51,6 +50,83 @@ public struct Scheduled<T> {
     }
 }
 
+/// Returned once a task was scheduled to be repeatedly executed on the `EventLoop`.
+///
+/// A `RepeatedTask` allows the user to `cancel()` the repeated scheduling of further tasks.
+public final class RepeatedTask {
+    private let delay: TimeAmount
+    private let eventLoop: EventLoop
+    private var scheduled: Scheduled<EventLoopFuture<Void>>?
+    private var task: (() -> EventLoopFuture<Void>)?
+
+    internal init(interval: TimeAmount, eventLoop: EventLoop, task: @escaping () -> EventLoopFuture<Void>) {
+        self.delay = interval
+        self.eventLoop = eventLoop
+        self.task = task
+    }
+
+    internal func begin(in delay: TimeAmount) {
+        if self.eventLoop.inEventLoop {
+            self.begin0(in: delay)
+        } else {
+            self.eventLoop.execute {
+                self.begin0(in: delay)
+            }
+        }
+    }
+
+    private func begin0(in delay: TimeAmount) {
+        assert(self.eventLoop.inEventLoop)
+        guard let task = self.task else {
+            return
+        }
+        self.scheduled = eventLoop.scheduleTask(in: delay, task)
+        self.reschedule()
+    }
+
+    /// Try to cancel the execution of the repeated task.
+    ///
+    /// Whether the execution of the task is immediately canceled depends on whether the execution of a task has already begun.
+    ///  This means immediate cancellation is not guaranteed.
+    public func cancel() {
+        if self.eventLoop.inEventLoop {
+            self.cancel0()
+        } else {
+            self.eventLoop.execute {
+                self.cancel0()
+            }
+        }
+    }
+
+    private func cancel0() {
+        assert(self.eventLoop.inEventLoop)
+        self.scheduled?.cancel()
+        self.scheduled = nil
+        self.task = nil
+    }
+
+    private func reschedule() {
+        assert(self.eventLoop.inEventLoop)
+        guard let scheduled = self.scheduled else {
+            return
+        }
+
+        scheduled.futureResult.whenSuccess { future in
+            future.whenComplete {
+                self.reschedule0()
+            }
+        }
+    }
+
+    private func reschedule0() {
+        assert(self.eventLoop.inEventLoop)
+        guard let task = self.task else {
+            return
+        }
+        self.scheduled = self.eventLoop.scheduleTask(in: self.delay, task)
+        self.reschedule()
+    }
+}
 /// An EventLoop processes IO / tasks in an endless loop for `Channel`s until it's closed.
 ///
 /// Usually multiple `Channel`s share the same `EventLoop` for processing IO / tasks and so share the same processing `Thread`.
@@ -87,7 +163,7 @@ public protocol EventLoop: EventLoopGroup {
     /// Submit a given task to be executed by the `EventLoop`. Once the execution is complete the returned `EventLoopFuture` is notified.
     ///
     /// - parameters:
-    ///     - task: The closure that will be submited to the `EventLoop` for execution.
+    ///     - task: The closure that will be submitted to the `EventLoop` for execution.
     /// - returns: `EventLoopFuture` that is notified once the task was executed.
     func submit<T>(_ task: @escaping () throws -> T) -> EventLoopFuture<T>
 
@@ -99,10 +175,17 @@ public protocol EventLoop: EventLoopGroup {
 ///
 /// - note: `TimeAmount` should not be used to represent a point in time.
 public struct TimeAmount {
-    /// The nanoseconds representation of the `TimeAmount`.
-    public let nanoseconds: Int
+  
+    #if arch(arm) // 32-bit, Raspi/AppleWatch/etc
+        public typealias Value = Int64
+    #else // 64-bit, keeping that at Int for SemVer in the 1.x line.
+        public typealias Value = Int
+    #endif
 
-    private init(_ nanoseconds: Int) {
+    /// The nanoseconds representation of the `TimeAmount`.
+    public let nanoseconds: Value
+
+    private init(_ nanoseconds: Value) {
         self.nanoseconds = nanoseconds
     }
 
@@ -111,7 +194,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of nanoseconds this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func nanoseconds(_ amount: Int) -> TimeAmount {
+    public static func nanoseconds(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount)
     }
 
@@ -120,7 +203,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of microseconds this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func microseconds(_ amount: Int) -> TimeAmount {
+    public static func microseconds(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount * 1000)
     }
 
@@ -129,7 +212,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of milliseconds this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func milliseconds(_ amount: Int) -> TimeAmount {
+    public static func milliseconds(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount * 1000 * 1000)
     }
 
@@ -138,7 +221,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of seconds this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func seconds(_ amount: Int) -> TimeAmount {
+    public static func seconds(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount * 1000 * 1000 * 1000)
     }
 
@@ -147,7 +230,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of minutes this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func minutes(_ amount: Int) -> TimeAmount {
+    public static func minutes(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount * 1000 * 1000 * 1000 * 60)
     }
 
@@ -156,7 +239,7 @@ public struct TimeAmount {
     /// - parameters:
     ///     - amount: the amount of hours this `TimeAmount` represents.
     /// - returns: the `TimeAmount` for the given amount.
-    public static func hours(_ amount: Int) -> TimeAmount {
+    public static func hours(_ amount: Value) -> TimeAmount {
         return TimeAmount(amount * 1000 * 1000 * 1000 * 60 * 60)
     }
 }
@@ -165,7 +248,7 @@ extension TimeAmount: Comparable {
     public static func < (lhs: TimeAmount, rhs: TimeAmount) -> Bool {
         return lhs.nanoseconds < rhs.nanoseconds
     }
-    
+
     public static func == (lhs: TimeAmount, rhs: TimeAmount) -> Bool {
         return lhs.nanoseconds == rhs.nanoseconds
     }
@@ -204,7 +287,7 @@ extension EventLoop {
     ///
     /// - parameters:
     ///     - result: the value that is used by the `EventLoopFuture`.
-    /// - returns: a failed `EventLoopFuture`.
+    /// - returns: a succeeded `EventLoopFuture`.
     public func newSucceededFuture<T>(result: T) -> EventLoopFuture<T> {
         return EventLoopFuture<T>(eventLoop: self, result: result, file: "n/a", line: 0)
     }
@@ -216,6 +299,40 @@ extension EventLoop {
     public func close() throws {
         // Do nothing
     }
+
+    /// Schedule a repeated task to be executed by the `EventLoop` with a fixed delay between the end and start of each task.
+    ///
+    /// - parameters:
+    ///     - initialDelay: The delay after which the first task is executed.
+    ///     - delay: The delay between the end of one task and the start of the next.
+    ///     - task: The closure that will be executed.
+    /// - return: `RepeatedTask`
+    @discardableResult
+    public func scheduleRepeatedTask(initialDelay: TimeAmount, delay: TimeAmount, _ task: @escaping () throws -> Void) -> RepeatedTask {
+        let futureTask: () -> EventLoopFuture<Void> = {
+            do {
+                try task()
+                return self.newSucceededFuture(result: ())
+            } catch {
+                return self.newFailedFuture(error: error)
+            }
+        }
+        return self.scheduleRepeatedTask(initialDelay: initialDelay, delay: delay, futureTask)
+    }
+
+    /// Schedule a repeated task to be executed by the `EventLoop` with a fixed delay between the end and start of each task.
+    ///
+    /// - parameters:
+    ///     - initialDelay: The delay after which the first task is executed.
+    ///     - delay: The delay between the end of one task and the start of the next.
+    ///     - task: The closure that will be executed.
+    /// - return: `RepeatedTask`
+    @discardableResult
+    public func scheduleRepeatedTask(initialDelay: TimeAmount, delay: TimeAmount, _ task: @escaping () -> EventLoopFuture<Void>) -> RepeatedTask {
+        let repeated = RepeatedTask(interval: delay, eventLoop: self, task: task)
+        repeated.begin(in: initialDelay)
+        return repeated
+    }
 }
 
 /// Internal representation of a `Registration` to an `Selector`.
@@ -224,12 +341,12 @@ extension EventLoop {
 /// `SelectorEvent` that is provided to the user when an event is ready to be consumed for a `Selectable`. As we need to have access to the `ServerSocketChannel`
 /// and `SocketChannel` (to dispatch the events) we create our own `Registration` that holds a reference to these.
 enum NIORegistration: Registration {
-    case serverSocketChannel(ServerSocketChannel, IOEvent)
-    case socketChannel(SocketChannel, IOEvent)
-    case datagramChannel(DatagramChannel, IOEvent)
+    case serverSocketChannel(ServerSocketChannel, SelectorEventSet)
+    case socketChannel(SocketChannel, SelectorEventSet)
+    case datagramChannel(DatagramChannel, SelectorEventSet)
 
-    /// The `IOEvent` in which this `NIORegistration` is interested in.
-    var interested: IOEvent {
+    /// The `SelectorEventSet` in which this `NIORegistration` is interested in.
+    var interested: SelectorEventSet {
         set {
             switch self {
             case .serverSocketChannel(let c, _):
@@ -338,6 +455,12 @@ internal final class SelectableEventLoop: EventLoop {
         _addresses.deallocate()
     }
 
+    /// Is this `SelectableEventLoop` still open (ie. not shutting down or shut down)
+    internal var isOpen: Bool {
+        assert(self.inEventLoop)
+        return self.lifecycleState == .open
+    }
+
     /// Register the given `SelectableChannel` with this `SelectableEventLoop`. After this point all I/O for the `SelectableChannel` will be processed by this `SelectableEventLoop` until it
     /// is deregistered by calling `deregister`.
     public func register<C: SelectableChannel>(channel: C) throws {
@@ -385,9 +508,9 @@ internal final class SelectableEventLoop: EventLoop {
         },`in`)
 
         let scheduled = Scheduled(promise: promise, cancellationTask: {
-            self.tasksLock.lock()
-            self.scheduledTasks.remove(task)
-            self.tasksLock.unlock()
+            self.tasksLock.withLockVoid {
+                self.scheduledTasks.remove(task)
+            }
             self.wakeupSelector()
         })
 
@@ -403,10 +526,9 @@ internal final class SelectableEventLoop: EventLoop {
 
     /// Add the `ScheduledTask` to be executed.
     private func schedule0(_ task: ScheduledTask) {
-        tasksLock.lock()
-        scheduledTasks.push(task)
-        tasksLock.unlock()
-
+        tasksLock.withLockVoid {
+            scheduledTasks.push(task)
+        }
         wakeupSelector()
     }
 
@@ -419,43 +541,40 @@ internal final class SelectableEventLoop: EventLoop {
         }
     }
 
-    /// Handle the given `IOEvent` for the `SelectableChannel`.
-    private func handleEvent<C: SelectableChannel>(_ ev: IOEvent, channel: C) {
+    /// Handle the given `SelectorEventSet` for the `SelectableChannel`.
+    private func handleEvent<C: SelectableChannel>(_ ev: SelectorEventSet, channel: C) {
         guard channel.selectable.isOpen else {
             return
         }
 
-        switch ev {
-        case .write:
-            channel.writable()
-        case .read:
-            channel.readable()
-        case .all:
-            channel.writable()
+        // process resets first as they'll just cause the writes to fail anyway.
+        if ev.contains(.reset) {
+            channel.reset()
+        } else {
+            if ev.contains(.write) {
+                channel.writable()
 
-            guard channel.selectable.isOpen else {
-                return
+                guard channel.selectable.isOpen else {
+                    return
+                }
             }
-            channel.readable()
-        case .none:
-            // spurious wakeup
-            break
+
+            if ev.contains(.readEOF) {
+                channel.readEOF()
+            } else if ev.contains(.read) {
+                channel.readable()
+            }
         }
     }
 
-    private func currentSelectorStrategy() -> SelectorStrategy {
-        // TODO: Just use an atomic
-        tasksLock.lock()
-        let scheduled = scheduledTasks.peek()
-        tasksLock.unlock()
-
-        guard let sched = scheduled else {
-            // No tasks to handle so just block
+    private func currentSelectorStrategy(nextReadyTask: ScheduledTask?) -> SelectorStrategy {
+        guard let sched = nextReadyTask else {
+            // No tasks to handle so just block. If any tasks were added in the meantime wakeup(...) was called and so this
+            // will directly unblock.
             return .block
         }
 
         let nextReady = sched.readyIn(DispatchTime.now())
-
         if nextReady <= .nanoseconds(0) {
             // Something is ready to be processed just do a non-blocking select of events.
             return .now
@@ -469,25 +588,25 @@ internal final class SelectableEventLoop: EventLoop {
         precondition(self.inEventLoop, "tried to run the EventLoop on the wrong thread.")
         defer {
             var scheduledTasksCopy = ContiguousArray<ScheduledTask>()
-            tasksLock.lock()
-            // reserve the correct capacity so we don't need to realloc later on.
-            scheduledTasksCopy.reserveCapacity(scheduledTasks.count)
-            while let sched = scheduledTasks.pop() {
-                scheduledTasksCopy.append(sched)
+            tasksLock.withLockVoid {
+                // reserve the correct capacity so we don't need to realloc later on.
+                scheduledTasksCopy.reserveCapacity(scheduledTasks.count)
+                while let sched = scheduledTasks.pop() {
+                    scheduledTasksCopy.append(sched)
+                }
             }
-            tasksLock.unlock()
 
             // Fail all the scheduled tasks.
             for task in scheduledTasksCopy {
                 task.fail(error: EventLoopError.shutdown)
             }
         }
+        var nextReadyTask: ScheduledTask? = nil
         while lifecycleState != .closed {
             // Block until there are events to handle or the selector was woken up
             /* for macOS: in case any calls we make to Foundation put objects into an autoreleasepool */
             try withAutoReleasePool {
-
-                try selector.whenReady(strategy: currentSelectorStrategy()) { ev in
+                try selector.whenReady(strategy: currentSelectorStrategy(nextReadyTask: nextReadyTask)) { ev in
                     switch ev.registration {
                     case .serverSocketChannel(let chan, _):
                         self.handleEvent(ev.io, channel: chan)
@@ -502,26 +621,29 @@ internal final class SelectableEventLoop: EventLoop {
             // We need to ensure we process all tasks, even if a task added another task again
             while true {
                 // TODO: Better locking
-                tasksLock.lock()
-                if scheduledTasks.isEmpty {
-                    tasksLock.unlock()
-                    break
+                tasksLock.withLockVoid {
+                    if !scheduledTasks.isEmpty {
+                        // We only fetch the time one time as this may be expensive and is generally good enough as if we miss anything we will just do a non-blocking select again anyway.
+                        let now = DispatchTime.now()
+
+                        // Make a copy of the tasks so we can execute these while not holding the lock anymore
+                        while tasksCopy.count < tasksCopy.capacity, let task = scheduledTasks.peek() {
+                            if task.readyIn(now) <= .nanoseconds(0) {
+                                _ = scheduledTasks.pop()
+                                tasksCopy.append(task.task)
+                            } else {
+                                nextReadyTask = task
+                                break
+                            }
+                        }
+                    } else {
+                        // Reset nextReadyTask to nil which means we will do a blocking select.
+                        nextReadyTask = nil
+                    }
                 }
-
-                // We only fetch the time one time as this may be expensive and is generally good enough as if we miss anything we will just do a non-blocking select again anyway.
-                let now = DispatchTime.now()
-
-                // Make a copy of the tasks so we can execute these while not holding the lock anymore
-                while tasksCopy.count < tasksCopy.capacity, let task = scheduledTasks.peek(), task.readyIn(now) <= .nanoseconds(0) {
-                    tasksCopy.append(task.task)
-
-                    _ = scheduledTasks.pop()
-                }
-
-                tasksLock.unlock()
 
                 // all pending tasks are set to occur in the future, so we can stop looping.
-                if tasksCopy.count == 0 {
+                if tasksCopy.isEmpty {
                     break
                 }
 
@@ -646,7 +768,7 @@ typealias ThreadInitializer = (Thread) -> Void
 final public class MultiThreadedEventLoopGroup: EventLoopGroup {
 
     private static let threadSpecificEventLoop = ThreadSpecificVariable<SelectableEventLoop>()
-    
+
     private let index = Atomic<Int>(value: 0)
     private let eventLoops: [SelectableEventLoop]
 
@@ -658,41 +780,46 @@ final public class MultiThreadedEventLoopGroup: EventLoopGroup {
         /* synchronised by `lock` */
         var _loop: SelectableEventLoop! = nil
 
-        if #available(OSX 10.12, *) {
-            loopUpAndRunningGroup.enter()
-            Thread.spawnAndRun(name: name) { t in
-                initializer(t)
+        loopUpAndRunningGroup.enter()
+        Thread.spawnAndRun(name: name) { t in
+            initializer(t)
 
-                do {
-                    /* we try! this as this must work (just setting up kqueue/epoll) or else there's not much we can do here */
-                    let l = try! SelectableEventLoop(thread: t)
-                    threadSpecificEventLoop.currentValue = l
-                    defer {
-                        threadSpecificEventLoop.currentValue = nil
-                    }
-                    lock.withLock {
-                        _loop = l
-                    }
-                    loopUpAndRunningGroup.leave()
-                    try l.run()
-                } catch let err {
-                    fatalError("unexpected error while executing EventLoop \(err)")
+            do {
+                /* we try! this as this must work (just setting up kqueue/epoll) or else there's not much we can do here */
+                let l = try! SelectableEventLoop(thread: t)
+                threadSpecificEventLoop.currentValue = l
+                defer {
+                    threadSpecificEventLoop.currentValue = nil
                 }
+                lock.withLock {
+                    _loop = l
+                }
+                loopUpAndRunningGroup.leave()
+                try l.run()
+            } catch let err {
+                fatalError("unexpected error while executing EventLoop \(err)")
             }
-            loopUpAndRunningGroup.wait()
-            return lock.withLock { _loop }
-        } else {
-            fatalError("Unsupported platform / OS version")
         }
+        loopUpAndRunningGroup.wait()
+        return lock.withLock { _loop }
     }
 
+    /// Creates a `MultiThreadedEventLoopGroup` instance which uses `numberOfThreads`.
+    ///
+    /// - arguments:
+    ///     - numberOfThreads: The number of `Threads` to use.
+    public convenience init(numberOfThreads: Int) {
+        let initializers: [ThreadInitializer] = Array(repeating: { _ in }, count: numberOfThreads)
+        self.init(threadInitializers: initializers)
+    }
+    
     /// Creates a `MultiThreadedEventLoopGroup` instance which uses `numThreads`.
     ///
     /// - arguments:
     ///     - numThreads: The number of `Threads` to use.
+    @available(*, deprecated, renamed: "init(numberOfThreads:)")
     public convenience init(numThreads: Int) {
-        let initializers: [ThreadInitializer] = Array(repeating: { _ in }, count: numThreads)
-        self.init(threadInitializers: initializers)
+        self.init(numberOfThreads: numThreads)
     }
 
     /// Creates a `MultiThreadedEventLoopGroup` instance which uses the given `ThreadInitializer`s. One `Thread` per `ThreadInitializer` is created and used.
@@ -761,19 +888,19 @@ final public class MultiThreadedEventLoopGroup: EventLoopGroup {
 private final class ScheduledTask {
     let task: () -> Void
     private let failFn: (Error) ->()
-    private let readyTime: Int
+    private let readyTime: TimeAmount.Value
 
     init(_ task: @escaping () -> Void, _ failFn: @escaping (Error) -> Void, _ time: TimeAmount) {
         self.task = task
         self.failFn = failFn
-        self.readyTime = time.nanoseconds + Int(DispatchTime.now().uptimeNanoseconds)
+        self.readyTime = time.nanoseconds + TimeAmount.Value(DispatchTime.now().uptimeNanoseconds)
     }
 
     func readyIn(_ t: DispatchTime) -> TimeAmount {
         if readyTime < t.uptimeNanoseconds {
             return .nanoseconds(0)
         }
-        return .nanoseconds(readyTime - Int(t.uptimeNanoseconds))
+        return .nanoseconds(readyTime - TimeAmount.Value(t.uptimeNanoseconds))
     }
 
     func fail(error: Error) {
@@ -791,7 +918,7 @@ extension ScheduledTask: Comparable {
     public static func < (lhs: ScheduledTask, rhs: ScheduledTask) -> Bool {
         return lhs.readyTime < rhs.readyTime
     }
-    
+
     public static func == (lhs: ScheduledTask, rhs: ScheduledTask) -> Bool {
         return lhs === rhs
     }

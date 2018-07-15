@@ -29,6 +29,10 @@ extension EventLoopTest {
                 ("testSchedule", testSchedule),
                 ("testScheduleWithDelay", testScheduleWithDelay),
                 ("testScheduleCancelled", testScheduleCancelled),
+                ("testScheduleRepeatedTask", testScheduleRepeatedTask),
+                ("testScheduleRepeatedTaskCancelFromDifferentThread", testScheduleRepeatedTaskCancelFromDifferentThread),
+                ("testScheduleRepeatedTaskToNotRetainRepeatedTask", testScheduleRepeatedTaskToNotRetainRepeatedTask),
+                ("testScheduleRepeatedTaskToNotRetainEventLoop", testScheduleRepeatedTaskToNotRetainEventLoop),
                 ("testMultipleShutdown", testMultipleShutdown),
                 ("testShuttingDownFailsRegistration", testShuttingDownFailsRegistration),
                 ("testEventLoopThreads", testEventLoopThreads),
@@ -36,6 +40,8 @@ extension EventLoopTest {
                 ("testEventLoopPinnedCPUIdsConstructor", testEventLoopPinnedCPUIdsConstructor),
                 ("testCurrentEventLoop", testCurrentEventLoop),
                 ("testShutdownWhileScheduledTasksNotReady", testShutdownWhileScheduledTasksNotReady),
+                ("testCloseFutureNotifiedBeforeUnblock", testCloseFutureNotifiedBeforeUnblock),
+                ("testScheduleMultipleTasks", testScheduleMultipleTasks),
            ]
    }
 }

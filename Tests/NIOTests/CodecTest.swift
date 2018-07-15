@@ -18,16 +18,16 @@ import XCTest
 
 private var testDecoderIsNotQuadratic_mallocs = 0
 private var testDecoderIsNotQuadratic_reallocs = 0
-private func testDecoderIsNotQuadratic_freeHook(_ ptr: UnsafeMutableRawPointer) -> Void {
+private func testDecoderIsNotQuadratic_freeHook(_ ptr: UnsafeMutableRawPointer?) -> Void {
     free(ptr)
 }
 
-private func testDecoderIsNotQuadratic_mallocHook(_ size: Int) -> UnsafeMutableRawPointer {
+private func testDecoderIsNotQuadratic_mallocHook(_ size: Int) -> UnsafeMutableRawPointer? {
     testDecoderIsNotQuadratic_mallocs += 1
-    return malloc(size)!
+    return malloc(size)
 }
 
-private func testDecoderIsNotQuadratic_reallocHook(_ ptr: UnsafeMutableRawPointer, _ count: Int) -> UnsafeMutableRawPointer {
+private func testDecoderIsNotQuadratic_reallocHook(_ ptr: UnsafeMutableRawPointer?, _ count: Int) -> UnsafeMutableRawPointer? {
     testDecoderIsNotQuadratic_reallocs += 1
     return realloc(ptr, count)
 }
@@ -236,6 +236,93 @@ public class ByteToMessageDecoderTest: XCTestCase {
         XCTAssertTrue(try channel.writeInbound(buffer.getSlice(at: 0, length: 1)))
         XCTAssertEqual(decoder.cumulationBuffer!.readableBytes, 3072)
         XCTAssertEqual(decoder.cumulationBuffer!.readerIndex, 0)
+    }
+
+    func testDecoderReentranceChannelRead() throws {
+        let channel = EmbeddedChannel()
+        defer {
+            XCTAssertNoThrow(try channel.finish())
+        }
+
+        class TestDecoder: ByteToMessageDecoder {
+
+            typealias InboundIn = ByteBuffer
+            typealias InboundOut = ByteBuffer
+
+            var cumulationBuffer: ByteBuffer?
+            var reentranced: Bool = false
+            var decode: Bool = false
+
+            func decode(ctx: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
+                guard !self.decode else {
+                    self.reentranced = true
+                    return .needMoreData
+                }
+                self.decode = true
+                defer {
+                    self.decode = false
+                }
+
+                if !self.reentranced {
+                    ctx.channel.pipeline.fireChannelRead(self.wrapInboundOut(buffer))
+                }
+                ctx.fireChannelRead(self.wrapInboundOut(buffer.readSlice(length: 2)!))
+                return .continue
+            }
+        }
+
+        XCTAssertNoThrow(try channel.pipeline.add(handler: TestDecoder()).wait())
+
+        var inputBuffer = channel.allocator.buffer(capacity: 4)
+        inputBuffer.write(staticString: "xxxx")
+        XCTAssertTrue(try channel.writeInbound(inputBuffer))
+
+        let buffer = inputBuffer.readSlice(length: 2)!
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertNil(channel.readInbound())
+    }
+
+    func testDecoderWriteIntoCumulationBuffer() throws {
+        let channel = EmbeddedChannel()
+        defer {
+            XCTAssertNoThrow(try channel.finish())
+        }
+
+        class WriteDecoder: ByteToMessageDecoder {
+
+            typealias InboundIn = ByteBuffer
+            typealias InboundOut = ByteBuffer
+
+            var cumulationBuffer: ByteBuffer?
+
+            func decode(ctx: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
+                XCTAssertTrue(buffer.readableBytes <= 4)
+
+                ctx.fireChannelRead(self.wrapInboundOut(buffer.readSlice(length: 2)!))
+
+                if buffer.readableBytes > 0 {
+                    // This should not be visible anymore after we exit the method which also means we should never see more then 4 readableBytes.
+                    buffer.set(integer: UInt(0), at: buffer.readerIndex)
+                    XCTAssertEqual(UInt(0), buffer.getInteger(at: buffer.readerIndex))
+                }
+
+                return .continue
+            }
+        }
+
+        XCTAssertNoThrow(try channel.pipeline.add(handler: WriteDecoder()).wait())
+
+        var inputBuffer = channel.allocator.buffer(capacity: 4)
+        inputBuffer.write(staticString: "xxxx")
+        XCTAssertTrue(try channel.writeInbound(inputBuffer))
+
+        let buffer = inputBuffer.readSlice(length: 2)!
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertEqual(buffer, channel.readInbound())
+        XCTAssertNil(channel.readInbound())
     }
 }
 

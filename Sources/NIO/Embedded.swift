@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 import Dispatch
-import NIOPriorityQueue
 
 private final class EmbeddedScheduledTask {
     let task: () -> Void
@@ -159,6 +158,7 @@ class EmbeddedChannelCore: ChannelCore {
     }
 
     var outboundBuffer: [IOData] = []
+    var pendingOutboundBuffer: [(IOData, EventLoopPromise<Void>?)] = []
     var inboundBuffer: [NIOAny] = []
 
     func localAddress0() throws -> SocketAddress {
@@ -175,10 +175,10 @@ class EmbeddedChannelCore: ChannelCore {
             return
         }
         isOpen = false
+        isActive = false
         promise?.succeed(result: ())
 
         // As we called register() in the constructor of EmbeddedChannel we also need to ensure we call unregistered here.
-        isActive = false
         pipeline.fireChannelInactive0()
         pipeline.fireChannelUnregistered0()
 
@@ -194,8 +194,8 @@ class EmbeddedChannelCore: ChannelCore {
     }
 
     func connect0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        promise?.succeed(result: ())
         isActive = true
+        promise?.succeed(result: ())
         pipeline.fireChannelActive0()
     }
 
@@ -204,17 +204,28 @@ class EmbeddedChannelCore: ChannelCore {
         pipeline.fireChannelRegistered0()
     }
 
+    func registerAlreadyConfigured0(promise: EventLoopPromise<Void>?) {
+        isActive = true
+        register0(promise: promise)
+        pipeline.fireChannelActive0()
+    }
+
     func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
         guard let data = data.tryAsIOData() else {
             promise?.fail(error: ChannelError.writeDataUnsupported)
             return
         }
 
-        addToBuffer(buffer: &outboundBuffer, data: data)
-        promise?.succeed(result: ())
+        self.pendingOutboundBuffer.append((data, promise))
     }
 
     func flush0() {
+        let pendings = self.pendingOutboundBuffer
+        self.pendingOutboundBuffer.removeAll()
+        for dataAndPromise in pendings {
+            self.addToBuffer(buffer: &self.outboundBuffer, data: dataAndPromise.0)
+            dataAndPromise.1?.succeed(result: ())
+        }
     }
 
     func read0() {
@@ -240,6 +251,37 @@ class EmbeddedChannelCore: ChannelCore {
     }
 }
 
+/// `EmbeddedChannel` is a `Channel` implementation that does neither any
+/// actual IO nor has a proper eventing mechanism. The prime use-case for
+/// `EmbeddedChannel` is in unit tests when you want to feed the inbound events
+/// and check the outbound events manually.
+///
+/// To feed events through an `EmbeddedChannel`'s `ChannelPipeline` use
+/// `EmbeddedChannel.writeInbound` which accepts data of any type. It will then
+/// forward that data through the `ChannelPipeline` and the subsequent
+/// `ChannelInboundHandler` will receive it through the usual `channelRead`
+/// event. The user is responsible for making sure the first
+/// `ChannelInboundHandler` expects data of that type.
+///
+/// `EmbeddedChannel` automatically collects arriving outbound data and makes it
+/// available one-by-one through `readOutbound`.
+///
+/// - note: Due to [#243](https://github.com/apple/swift-nio/issues/243)
+///   `EmbeddedChannel` expects outbound data to be of `IOData` type. This is an
+///   incorrect and unfortunate assumption that will be fixed with the next
+///   major NIO release when we can change the public API again. If you do need
+///   to collect outbound data that is not `IOData` you can create a custom
+///   `ChannelOutboundHandler`, insert it at the very beginning of the
+///   `ChannelPipeline` and collect the outbound data there. Just don't forward
+///   it using `ctx.write`.
+/// - note: `EmbeddedChannel` is currently only compatible with
+///   `EmbeddedEventLoop`s and cannot be used with `SelectableEventLoop`s from
+///   for example `MultiThreadedEventLoopGroup`.
+/// - warning: Unlike other `Channel`s, `EmbeddedChannel` **is not thread-safe**. This
+///     is because it is intended to be run in the thread that instantiated it. Users are
+///     responsible for ensuring they never call into an `EmbeddedChannel` in an
+///     unsynchronized fashion. `EmbeddedEventLoop`s notes also apply as
+///     `EmbeddedChannel` uses an `EmbeddedEventLoop` as its `EventLoop`.
 public class EmbeddedChannel: Channel {
 
     public var isActive: Bool { return channelcore.isActive }
@@ -263,7 +305,7 @@ public class EmbeddedChannel: Channel {
         try close().wait()
         (self.eventLoop as! EmbeddedEventLoop).run()
         try throwIfErrorCaught()
-        return !channelcore.outboundBuffer.isEmpty || !channelcore.inboundBuffer.isEmpty
+        return !channelcore.outboundBuffer.isEmpty || !channelcore.inboundBuffer.isEmpty || !channelcore.pendingOutboundBuffer.isEmpty
     }
 
     private var _pipeline: ChannelPipeline!

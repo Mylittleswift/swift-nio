@@ -36,16 +36,31 @@ private class DatagramReadRecorder<DataType>: ChannelInboundHandler {
     typealias InboundIn = AddressedEnvelope<DataType>
     typealias InboundOut = AddressedEnvelope<DataType>
 
+    enum State {
+        case fresh
+        case registered
+        case active
+    }
+
     var reads: [AddressedEnvelope<DataType>] = []
     var loop: EventLoop? = nil
+    var state: State = .fresh
 
     var readWaiters: [Int: EventLoopPromise<[AddressedEnvelope<DataType>]>] = [:]
 
     func channelRegistered(ctx: ChannelHandlerContext) {
+        XCTAssertEqual(.fresh, self.state)
+        self.state = .registered
         self.loop = ctx.eventLoop
     }
 
+    func channelActive(ctx: ChannelHandlerContext) {
+        XCTAssertEqual(.registered, self.state)
+        self.state = .active
+    }
+
     func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
+        XCTAssertEqual(.active, self.state)
         let data = self.unwrapInboundIn(data)
         reads.append(data)
 
@@ -83,7 +98,7 @@ final class DatagramChannelTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        self.group = MultiThreadedEventLoopGroup(numThreads: 1)
+        self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.firstChannel = try! buildChannel(group: group)
         self.secondChannel = try! buildChannel(group: group)
     }
@@ -217,7 +232,7 @@ final class DatagramChannelTests: XCTestCase {
         var overall = self.firstChannel.eventLoop.newSucceededFuture(result: ())
         // We defer this work to the background thread because otherwise it incurs an enormous number of context
         // switches.
-        _ = try self.firstChannel.eventLoop.submit {
+        try self.firstChannel.eventLoop.submit {
             let myPromise: EventLoopPromise<Void> = self.firstChannel.eventLoop.newPromise()
             // For datagrams this buffer cannot be very large, because if it's larger than the path MTU it
             // will cause EMSGSIZE.
@@ -365,7 +380,7 @@ final class DatagramChannelTests: XCTestCase {
             }
         }
 
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -406,5 +421,25 @@ final class DatagramChannelTests: XCTestCase {
 
     public func testSetGetOptionClosedDatagramChannel() throws {
         try assertSetGetOptionOnOpenAndClosed(channel: firstChannel, option: ChannelOptions.maxMessagesPerRead, value: 1)
+    }
+
+    func testWritesAreAccountedCorrectly() throws {
+        var buffer = firstChannel.allocator.buffer(capacity: 256)
+        buffer.write(staticString: "hello, world!")
+        let firstWrite = AddressedEnvelope(remoteAddress: self.secondChannel.localAddress!, data: buffer.getSlice(at: buffer.readerIndex, length: 5)!)
+        let secondWrite = AddressedEnvelope(remoteAddress: self.secondChannel.localAddress!, data: buffer)
+        self.firstChannel.write(NIOAny(firstWrite), promise: nil)
+        self.firstChannel.write(NIOAny(secondWrite), promise: nil)
+        self.firstChannel.flush()
+
+        let reads = try self.secondChannel.waitForDatagrams(count: 2)
+
+        // These datagrams should not have been dropped by the kernel.
+        XCTAssertEqual(reads.count, 2)
+
+        XCTAssertEqual(reads[0].data, buffer.getSlice(at: buffer.readerIndex, length: 5)!)
+        XCTAssertEqual(reads[0].remoteAddress, self.firstChannel.localAddress!)
+        XCTAssertEqual(reads[1].data, buffer)
+        XCTAssertEqual(reads[1].remoteAddress, self.firstChannel.localAddress!)
     }
 }

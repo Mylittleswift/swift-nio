@@ -25,7 +25,7 @@ class NonBlockingFileIOTest: XCTestCase {
     override func setUp() {
         super.setUp()
         self.allocator = ByteBufferAllocator()
-        self.group = MultiThreadedEventLoopGroup(numThreads: 1)
+        self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.threadPool = BlockingIOThreadPool(numberOfThreads: 6)
         self.threadPool.start()
         self.fileIO = NonBlockingFileIO(threadPool: threadPool)
@@ -448,5 +448,44 @@ class NonBlockingFileIOTest: XCTestCase {
                 }.wait()
         }
         XCTAssertEqual(2, numCalls)
+    }
+
+    func testFileOpenWorks() throws {
+        let content = "123"
+        try withTemporaryFile(content: content) { (fileHandle, path) -> Void in
+            let (fh, fr) = try self.fileIO.openFile(path: path, eventLoop: self.eventLoop).wait()
+            try fh.withUnsafeFileDescriptor { fd in
+                XCTAssertGreaterThanOrEqual(fd, 0)
+            }
+            XCTAssertTrue(fh.isOpen)
+            XCTAssertEqual(0, fr.readerIndex)
+            XCTAssertEqual(3, fr.endIndex)
+            try fh.close()
+        }
+    }
+
+    func testFileOpenWorksWithEmptyFile() throws {
+        let content = ""
+        try withTemporaryFile(content: content) { (fileHandle, path) -> Void in
+            let (fh, fr) = try self.fileIO.openFile(path: path, eventLoop: self.eventLoop).wait()
+            try fh.withUnsafeFileDescriptor { fd in
+                XCTAssertGreaterThanOrEqual(fd, 0)
+            }
+            XCTAssertTrue(fh.isOpen)
+            XCTAssertEqual(0, fr.readerIndex)
+            XCTAssertEqual(0, fr.endIndex)
+            try fh.close()
+        }
+    }
+
+    func testFileOpenFails() throws {
+        do {
+            _ = try self.fileIO.openFile(path: "/dev/null/this/does/not/exist", eventLoop: self.eventLoop).wait()
+            XCTFail("should've thrown")
+        } catch let e as IOError where e.errnoCode == ENOTDIR {
+            // OK
+        } catch {
+            XCTFail("wrong error: \(error)")
+        }
     }
 }

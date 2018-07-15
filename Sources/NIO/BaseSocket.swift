@@ -12,10 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// A Registration on a `Selector`, which is interested in an `IOEvent`.
+/// A Registration on a `Selector`, which is interested in an `SelectorEventSet`.
 protocol Registration {
-    /// The `IOEvent` in which the `Registration` is interested.
-    var interested: IOEvent { get set }
+    /// The `SelectorEventSet` in which the `Registration` is interested.
+    var interested: SelectorEventSet { get set }
 }
 
 protocol SockAddrProtocol {
@@ -394,7 +394,7 @@ class BaseSocket: Selectable {
     /// After the socket was closed all other methods will throw an `IOError` when called.
     ///
     /// - throws: An `IOError` if the operation failed.
-    final func close() throws {
+    func close() throws {
         try withUnsafeFileDescriptor { fd in
             try Posix.close(descriptor: fd)
         }

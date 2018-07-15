@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// "A list of `ChannelHandler`s that handle or intercept inbound events and outbound operations of a
+/// A list of `ChannelHandler`s that handle or intercept inbound events and outbound operations of a
 /// `Channel`. `ChannelPipeline` implements an advanced form of the Intercepting Filter pattern
 /// to give a user full control over how an event is handled and how the `ChannelHandler`s in a pipeline
 /// interact with each other.
@@ -66,7 +66,7 @@
 ///  |               |                                   |               |
 ///  |       [ Socket.read ]                    [ Socket.write ]         |
 ///  |                                                                   |
-///  |  SwiftNIO Internal I/O Threads (Transport Implementation)           |
+///  |  SwiftNIO Internal I/O Threads (Transport Implementation)         |
 ///  +-------------------------------------------------------------------+
 /// ```
 ///
@@ -145,13 +145,14 @@ public final class ChannelPipeline: ChannelInvoker {
 
     /// The `Channel` that this `ChannelPipeline` belongs to.
     ///
-    /// - warning: This is unsafe as it's only valid if the `Channel` is still open
-    private unowned let _channel: Channel
+    /// - note: This will be nil after the channel has closed
+    private var _channel: Channel?
 
     /// The `Channel` that this `ChannelPipeline` belongs to.
     internal var channel: Channel {
         assert(self.eventLoop.inEventLoop)
-        return !self.destroyed ? self._channel : DeadChannel(pipeline: self)
+        assert(self._channel != nil || self.destroyed)
+        return self._channel ?? DeadChannel(pipeline: self)
     }
 
     /// Add a `ChannelHandler` to the `ChannelPipeline`.
@@ -499,7 +500,10 @@ public final class ChannelPipeline: ChannelInvoker {
         return name
     }
 
-    /// Remove all the `ChannelHandler`s from the `ChannelPipeline` and destroy these. This method must only be called from within the `EventLoop`.
+    /// Remove all the `ChannelHandler`s from the `ChannelPipeline` and destroy these.
+    ///
+    /// This method must only be called from within the `EventLoop`. It should only be called from a `ChannelCore`
+    /// implementation. Once called, the `ChannelPipeline` is no longer active and cannot be used again.
     func removeHandlers() {
         assert(eventLoop.inEventLoop)
 
@@ -512,7 +516,8 @@ public final class ChannelPipeline: ChannelInvoker {
         self.head = nil
         self.tail = nil
 
-        destroyed = true
+        self.destroyed = true
+        self._channel = nil
     }
 
     // Just delegate to the head and tail context
@@ -823,6 +828,7 @@ public final class ChannelPipeline: ChannelInvoker {
     }
 
     func fireErrorCaught0(error: Error) {
+        assert((error as? ChannelError).map { $0 != .eof } ?? true)
         if let firstInboundCtx = firstInboundCtx {
             firstInboundCtx.invokeErrorCaught(error)
         }
@@ -938,7 +944,7 @@ private extension CloseMode {
 }
 
 /// Special `ChannelInboundHandler` which will consume all inbound events.
-/* private but tests */ final class TailChannelHandler: _ChannelInboundHandler, _ChannelOutboundHandler {
+/* private but tests */ final class TailChannelHandler: _ChannelInboundHandler {
 
     static let name = "tail"
     static let sharedInstance = TailChannelHandler()
@@ -1016,15 +1022,36 @@ public final class ChannelHandlerContext: ChannelInvoker {
     }
 
     public var remoteAddress: SocketAddress? {
-        return try? self.channel._unsafe.remoteAddress0()
+        do {
+            // Fast-path access to the remoteAddress.
+            return try self.channel._unsafe.remoteAddress0()
+        } catch ChannelError.ioOnClosedChannel {
+            // Channel was closed already but we may still have the address cached so try to access it via the Channel
+            // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
+            return self.channel.remoteAddress
+        } catch {
+            return nil
+        }
     }
 
     public var localAddress: SocketAddress? {
-        return try? self.channel._unsafe.localAddress0()
+        do {
+            // Fast-path access to the localAddress.
+            return try self.channel._unsafe.localAddress0()
+        } catch ChannelError.ioOnClosedChannel {
+            // Channel was closed already but we may still have the address cached so try to access it via the Channel
+            // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
+            return self.channel.localAddress
+        } catch {
+            return nil
+        }
+    }
+
+    public var eventLoop: EventLoop {
+        return self.pipeline.eventLoop
     }
 
     public let name: String
-    public let eventLoop: EventLoop
     private let inboundHandler: _ChannelInboundHandler?
     private let outboundHandler: _ChannelOutboundHandler?
 
@@ -1032,17 +1059,8 @@ public final class ChannelHandlerContext: ChannelInvoker {
     fileprivate init(name: String, handler: ChannelHandler, pipeline: ChannelPipeline) {
         self.name = name
         self.pipeline = pipeline
-        self.eventLoop = pipeline.eventLoop
-        if let handler = handler as? _ChannelInboundHandler {
-            self.inboundHandler = handler
-        } else {
-            self.inboundHandler = nil
-        }
-        if let handler = handler as? _ChannelOutboundHandler {
-            self.outboundHandler = handler
-        } else {
-            self.outboundHandler = nil
-        }
+        self.inboundHandler = handler as? _ChannelInboundHandler
+        self.outboundHandler = handler as? _ChannelOutboundHandler
         precondition(self.inboundHandler != nil || self.outboundHandler != nil, "ChannelHandlers need to either be inbound or outbound")
     }
 
@@ -1368,11 +1386,7 @@ public final class ChannelHandlerContext: ChannelInvoker {
         assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
 
         if let outboundHandler = self.outboundHandler {
-            if let promise = promise {
-                outboundHandler.write(ctx: self, data: data, promise: promise)
-            } else {
-                outboundHandler.write(ctx: self, data: data, promise: nil)
-            }
+            outboundHandler.write(ctx: self, data: data, promise: promise)
             outboundHandler.flush(ctx: self)
         } else {
             self.prev?.invokeWriteAndFlush(data, promise: promise)

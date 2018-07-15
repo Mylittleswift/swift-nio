@@ -58,7 +58,7 @@ public extension ChannelPipeline {
                                                   upgraders: [HTTPProtocolUpgrader],
                                                   _ upgradeCompletionHandler: @escaping (ChannelHandlerContext) -> Void) -> EventLoopFuture<Void> {
         let responseEncoder = HTTPResponseEncoder()
-        let requestDecoder = HTTPRequestDecoder()
+        let requestDecoder = HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes)
         let upgrader = HTTPServerUpgradeHandler(upgraders: upgraders,
                                                 httpEncoder: responseEncoder,
                                                 extraHTTPHandlers: [requestDecoder],
@@ -89,17 +89,25 @@ public extension ChannelPipeline {
     ///         provided should be a tuple of an array of `HTTPProtocolUpgrader` and the upgrade
     ///         completion handler. See the documentation on `HTTPServerUpgradeHandler` for more
     ///         details.
+    ///     - errorHandling: Whether to provide assistance handling protocol errors (e.g.
+    ///         failure to parse the HTTP request) by sending 400 errors. Defaults to `false` for
+    ///         backward-compatibility reasons.
     /// - returns: An `EventLoopFuture` that will fire when the pipeline is configured.
     public func configureHTTPServerPipeline(first: Bool = false,
                                             withPipeliningAssistance pipelining: Bool = true,
-                                            withServerUpgrade upgrade: HTTPUpgradeConfiguration? = nil) -> EventLoopFuture<Void> {
+                                            withServerUpgrade upgrade: HTTPUpgradeConfiguration? = nil,
+                                            withErrorHandling errorHandling: Bool = false) -> EventLoopFuture<Void> {
         let responseEncoder = HTTPResponseEncoder()
-        let requestDecoder = HTTPRequestDecoder()
+        let requestDecoder = HTTPRequestDecoder(leftOverBytesStrategy: upgrade == nil ? .dropBytes : .forwardBytes)
 
         var handlers: [ChannelHandler] = [responseEncoder, requestDecoder]
 
         if pipelining {
             handlers.append(HTTPServerPipelineHandler())
+        }
+
+        if errorHandling {
+            handlers.append(HTTPServerProtocolErrorHandler())
         }
 
         if let (upgraders, completionHandler) = upgrade {

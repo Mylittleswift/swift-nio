@@ -35,7 +35,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testEcho() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -71,7 +71,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testLotsOfUnflushedWrites() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -104,7 +104,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testEchoUnixDomainSocket() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -147,7 +147,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testConnectUnixDomainSocket() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -189,7 +189,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testChannelActiveOnConnect() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -215,7 +215,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testWriteThenRead() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -406,7 +406,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testCloseInInactive() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
             defer {
                 XCTAssertNoThrow(try group.syncShutdownGracefully())
             }
@@ -440,7 +440,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testFlushOnEmpty() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -485,7 +485,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testWriteOnConnect() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -518,39 +518,39 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testWriteOnAccept() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
 
         let stringToWrite = "hello"
-        let serverChannel = try ServerBootstrap(group: group)
+        let serverChannel = try assertNoThrowWithValue(ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .childChannelInitializer { channel in
                 channel.pipeline.add(handler: WriteOnConnectHandler(toWrite: stringToWrite))
-            }.bind(host: "127.0.0.1", port: 0).wait()
+            }.bind(host: "127.0.0.1", port: 0).wait())
 
         defer {
             XCTAssertNoThrow(try serverChannel.close().wait())
         }
 
         let promise: EventLoopPromise<ByteBuffer> = group.next().newPromise()
-        let clientChannel = try ClientBootstrap(group: group)
+        let clientChannel = try assertNoThrowWithValue(ClientBootstrap(group: group)
             .channelInitializer { channel in
                 channel.pipeline.add(handler: ByteCountingHandler(numBytes: stringToWrite.utf8.count, promise: promise))
             }
-            .connect(to: serverChannel.localAddress!).wait()
+            .connect(to: serverChannel.localAddress!).wait())
 
         defer {
-            _ = clientChannel.close()
+            XCTAssertNoThrow(try clientChannel.close().wait())
         }
 
-        let bytes = try promise.futureResult.wait()
+        let bytes = try assertNoThrowWithValue(promise.futureResult.wait())
         XCTAssertEqual(bytes.getString(at: bytes.readerIndex, length: bytes.readableBytes), stringToWrite)
     }
 
     func testWriteAfterChannelIsDead() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let dpGroup = DispatchGroup()
 
         dpGroup.enter()
@@ -587,7 +587,7 @@ class EchoServerClientTest : XCTestCase {
     }
 
     func testPendingReadProcessedAfterWriteError() throws {
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let dpGroup = DispatchGroup()
 
         dpGroup.enter()
@@ -645,18 +645,18 @@ class EchoServerClientTest : XCTestCase {
                 }
             }
         }
-        let serverChannel = try ServerBootstrap(group: group)
+        let serverChannel = try assertNoThrowWithValue(ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .childChannelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
             .childChannelInitializer { channel in
                 channel.pipeline.add(handler: WriteWhenActiveHandler(str, dpGroup))
-            }.bind(host: "127.0.0.1", port: 0).wait()
+            }.bind(host: "127.0.0.1", port: 0).wait())
 
         defer {
-            _ = serverChannel.close()
+            XCTAssertNoThrow(try serverChannel.syncCloseAcceptingAlreadyClosed())
         }
 
-        let clientChannel = try ClientBootstrap(group: group)
+        let clientChannel = try assertNoThrowWithValue(ClientBootstrap(group: group)
             // We will only start reading once we wrote all data on the accepted channel.
             //.channelOption(ChannelOptions.autoRead, value: false)
             .channelOption(ChannelOptions.recvAllocator, value: FixedSizeRecvByteBufferAllocator(capacity: 2))
@@ -664,9 +664,9 @@ class EchoServerClientTest : XCTestCase {
                 channel.pipeline.add(handler: WriteHandler()).then {
                     channel.pipeline.add(handler: countingHandler)
                 }
-            }.connect(to: serverChannel.localAddress!).wait()
+            }.connect(to: serverChannel.localAddress!).wait())
         defer {
-            _ = clientChannel.close()
+            XCTAssertNoThrow(try clientChannel.syncCloseAcceptingAlreadyClosed())
         }
         dpGroup.wait()
 
@@ -703,7 +703,7 @@ class EchoServerClientTest : XCTestCase {
             }
         }
 
-        let group = MultiThreadedEventLoopGroup(numThreads: 1)
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer {
             XCTAssertNoThrow(try group.syncShutdownGracefully())
         }
@@ -730,7 +730,7 @@ class EchoServerClientTest : XCTestCase {
     func testPortNumbers() throws {
         var atLeastOneSucceeded = false
         for host in ["127.0.0.1", "::1"] {
-            let group = MultiThreadedEventLoopGroup(numThreads: 1)
+            let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
             defer {
                 XCTAssertNoThrow(try group.syncShutdownGracefully())
             }
@@ -778,5 +778,52 @@ class EchoServerClientTest : XCTestCase {
             XCTAssertEqual(acceptedRemotePort.load(), clientChannel.localAddress?.port.map(Int.init) ?? -6)
         }
         XCTAssertTrue(atLeastOneSucceeded)
+    }
+
+    func testConnectingToIPv4And6ButServerOnlyWaitsOnIPv4() throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer {
+            XCTAssertNoThrow(try group.syncShutdownGracefully())
+        }
+
+        let numBytes = 16 * 1024
+        let promise: EventLoopPromise<ByteBuffer> = group.next().newPromise()
+        let countingHandler = ByteCountingHandler(numBytes: numBytes, promise: promise)
+
+        // we're binding to IPv4 only
+        let serverChannel = try ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .childChannelInitializer { channel in
+                channel.pipeline.add(handler: countingHandler)
+            }
+            .bind(host: "127.0.0.1", port: 0)
+            .wait()
+
+        defer {
+            XCTAssertNoThrow(try serverChannel.syncCloseAcceptingAlreadyClosed())
+        }
+
+        // but we're trying to connect to (depending on the system configuration and resolver) IPv4 and IPv6
+        let clientChannel = try ClientBootstrap(group: group)
+            .connect(host: "localhost", port: Int(serverChannel.localAddress!.port!))
+            .thenIfError {
+                promise.fail(error: $0)
+                return group.next().newFailedFuture(error: $0)
+            }
+            .wait()
+
+        defer {
+            XCTAssertNoThrow(try clientChannel.syncCloseAcceptingAlreadyClosed())
+        }
+
+        var buffer = clientChannel.allocator.buffer(capacity: numBytes)
+
+        for i in 0..<numBytes {
+            buffer.write(integer: UInt8(i % 256))
+        }
+
+        try clientChannel.writeAndFlush(NIOAny(buffer)).wait()
+
+        try countingHandler.assertReceived(buffer: buffer)
     }
 }

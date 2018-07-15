@@ -56,6 +56,20 @@ func withTemporaryFile<T>(content: String? = nil, _ body: (NIO.FileHandle, Strin
     return try body(fileHandle, path)
 }
 
+func createTemporaryDirectory() -> String {
+    let template = "/tmp/.NIOTests-temp-dir_XXXXXX"
+    var templateBytes = template.utf8 + [0]
+    let templateBytesCount = templateBytes.count
+    templateBytes.withUnsafeMutableBufferPointer { ptr in
+        ptr.baseAddress!.withMemoryRebound(to: Int8.self, capacity: templateBytesCount) { (ptr: UnsafeMutablePointer<Int8>) in
+            let ret = mkdtemp(ptr)
+            XCTAssertNotNil(ret)
+        }
+    }
+    templateBytes.removeLast()
+    return String(decoding: templateBytes, as: UTF8.self)
+}
+
 func openTemporaryFile() -> (CInt, String) {
     let template = "/tmp/niotestXXXXXXX"
     var templateBytes = template.utf8 + [0]
@@ -149,5 +163,18 @@ func assertSetGetOptionOnOpenAndClosed<T: ChannelOption>(channel: Channel, optio
         _ = try channel.getOption(option: option).wait()
     } catch let err as ChannelError where err == .ioOnClosedChannel {
         // expected
+    }
+}
+
+func assertNoThrowWithValue<T>(_ body: @autoclosure () throws -> T, defaultValue: T? = nil, file: StaticString = #file, line: UInt = #line) throws -> T {
+    do {
+        return try body()
+    } catch {
+        XCTFail("unexpected error \(error) thrown", file: file, line: line)
+        if let defaultValue = defaultValue {
+            return defaultValue
+        } else {
+            throw error
+        }
     }
 }

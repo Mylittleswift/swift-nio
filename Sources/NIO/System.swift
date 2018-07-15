@@ -118,10 +118,9 @@ internal func wrapSyscall<T: FixedWidthInteger>(where function: StaticString = #
 
 /* Sorry, we really try hard to not use underscored attributes. In this case however we seem to break the inlining threshold which makes a system call take twice the time, ie. we need this exception. */
 @inline(__always)
-internal func wrapErrorIsNullReturnCall(where function: StaticString = #function, _ body: () throws -> UnsafePointer<CChar>?) throws -> UnsafePointer<CChar>? {
+internal func wrapErrorIsNullReturnCall<T>(where function: StaticString = #function, _ body: () throws -> T?) throws -> T {
     while true {
-        let res = try body()
-        if res == nil {
+        guard let res = try body() else {
             let err = errno
             if err == EINTR {
                 continue
@@ -141,11 +140,11 @@ enum Shutdown {
     fileprivate var cValue: CInt {
         switch self {
         case .RD:
-            return CInt(SHUT_RD)
+            return CInt(Posix.SHUT_RD)
         case .WR:
-            return CInt(SHUT_WR)
+            return CInt(Posix.SHUT_WR)
         case .RDWR:
-            return CInt(SHUT_RDWR)
+            return CInt(Posix.SHUT_RDWR)
         }
     }
 }
@@ -154,11 +153,19 @@ internal enum Posix {
 #if os(macOS) || os(iOS) || os(watchOS) || os(tvOS)
     static let SOCK_STREAM: CInt = CInt(Darwin.SOCK_STREAM)
     static let SOCK_DGRAM: CInt = CInt(Darwin.SOCK_DGRAM)
+    static let IPPROTO_TCP: CInt = CInt(Darwin.IPPROTO_TCP)
     static let UIO_MAXIOV: Int = 1024
+    static let SHUT_RD: CInt = CInt(Darwin.SHUT_RD)
+    static let SHUT_WR: CInt = CInt(Darwin.SHUT_WR)
+    static let SHUT_RDWR: CInt = CInt(Darwin.SHUT_RDWR)
 #elseif os(Linux) || os(FreeBSD) || os(Android)
     static let SOCK_STREAM: CInt = CInt(Glibc.SOCK_STREAM.rawValue)
     static let SOCK_DGRAM: CInt = CInt(Glibc.SOCK_DGRAM.rawValue)
+    static let IPPROTO_TCP: CInt = CInt(Glibc.IPPROTO_TCP)
     static let UIO_MAXIOV: Int = Int(Glibc.UIO_MAXIOV)
+    static let SHUT_RD: CInt = CInt(Glibc.SHUT_RD)
+    static let SHUT_WR: CInt = CInt(Glibc.SHUT_WR)
+    static let SHUT_RDWR: CInt = CInt(Glibc.SHUT_RDWR)
 #else
     static var SOCK_STREAM: CInt {
         fatalError("unsupported OS")
@@ -360,7 +367,7 @@ internal enum Posix {
 
     @discardableResult
     @inline(never)
-    public static func inet_ntop(addressFamily: CInt, addressBytes: UnsafeRawPointer, addressDescription: UnsafeMutablePointer<CChar>, addressDescriptionLength: socklen_t) throws -> UnsafePointer<CChar>? {
+    public static func inet_ntop(addressFamily: CInt, addressBytes: UnsafeRawPointer, addressDescription: UnsafeMutablePointer<CChar>, addressDescriptionLength: socklen_t) throws -> UnsafePointer<CChar> {
         return try wrapErrorIsNullReturnCall {
             sysInet_ntop(addressFamily, addressBytes, addressDescription, addressDescriptionLength)
         }
