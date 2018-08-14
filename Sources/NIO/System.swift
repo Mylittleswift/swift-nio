@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 //  This file contains code that ensures errno is captured correctly when doing syscalls and no ARC traffic can happen inbetween that *could* change the errno
 //  value before we were able to read it.
-//  Its important that all static methods are declared with `@inline(never)` so its not possible any ARC traffic happens while we need to read errno.
+//  It's important that all static methods are declared with `@inline(never)` so it's not possible any ARC traffic happens while we need to read errno.
 //
 //  Created by Norman Maurer on 11/10/17.
 //
@@ -217,8 +217,8 @@ internal enum Posix {
 
     @inline(never)
     // TODO: Allow varargs
-    public static func fcntl(descriptor: CInt, command: CInt, value: CInt) throws {
-        _ = try wrapSyscall {
+    public static func fcntl(descriptor: CInt, command: CInt, value: CInt) throws -> CInt {
+        return try wrapSyscall {
             sysFcntl(descriptor, command, value)
         }
     }
@@ -233,7 +233,9 @@ internal enum Posix {
                 _ = unsafeBitCast(Glibc.signal(SIGPIPE, SIG_IGN) as sighandler_t?, to: Int.self)
             #else
                 if fd != -1 {
-                    _ = try? Posix.fcntl(descriptor: fd, command: F_SETNOSIGPIPE, value: 1)
+                    let ret = try? Posix.fcntl(descriptor: fd, command: F_SETNOSIGPIPE, value: 1)
+                    assert(ret == .some(0),
+                           "unexpectedly, fcntl(\(fd), F_SETFL, F_SETNOSIGPIPE) returned \(ret.debugDescription)")
                 }
             #endif
             return fd
@@ -270,8 +272,9 @@ internal enum Posix {
 
             #if !os(Linux)
                 if fd != -1 {
-                    // TODO: Handle return code ?
-                    _ = try? Posix.fcntl(descriptor: fd, command: F_SETNOSIGPIPE, value: 1)
+                    let ret = try? Posix.fcntl(descriptor: fd, command: F_SETNOSIGPIPE, value: 1)
+                    assert(ret == .some(0),
+                           "unexpectedly, fcntl(\(fd), F_SETFL, F_SETNOSIGPIPE) returned \(ret.debugDescription)")
                 }
             #endif
             return fd
@@ -314,7 +317,7 @@ internal enum Posix {
     }
 
     @inline(never)
-    public static func write(descriptor: CInt, pointer: UnsafePointer<UInt8>, size: Int) throws -> IOResult<Int> {
+    public static func write(descriptor: CInt, pointer: UnsafeRawPointer, size: Int) throws -> IOResult<Int> {
         return try wrapSyscallMayBlock {
             sysWrite(descriptor, pointer, size)
         }
@@ -328,7 +331,7 @@ internal enum Posix {
     }
 
     @inline(never)
-    public static func sendto(descriptor: CInt, pointer: UnsafePointer<UInt8>, size: size_t,
+    public static func sendto(descriptor: CInt, pointer: UnsafeRawPointer, size: size_t,
                               destinationPtr: UnsafePointer<sockaddr>, destinationSize: socklen_t) throws -> IOResult<Int> {
         return try wrapSyscallMayBlock {
             sysSendTo(descriptor, pointer, size, 0, destinationPtr, destinationSize)
@@ -336,14 +339,14 @@ internal enum Posix {
     }
 
     @inline(never)
-    public static func read(descriptor: CInt, pointer: UnsafeMutablePointer<UInt8>, size: size_t) throws -> IOResult<Int> {
+    public static func read(descriptor: CInt, pointer: UnsafeMutableRawPointer, size: size_t) throws -> IOResult<Int> {
         return try wrapSyscallMayBlock {
             sysRead(descriptor, pointer, size)
         }
     }
 
     @inline(never)
-    public static func recvfrom(descriptor: CInt, pointer: UnsafeMutablePointer<UInt8>, len: size_t, addr: UnsafeMutablePointer<sockaddr>, addrlen: UnsafeMutablePointer<socklen_t>) throws -> IOResult<ssize_t> {
+    public static func recvfrom(descriptor: CInt, pointer: UnsafeMutableRawPointer, len: size_t, addr: UnsafeMutablePointer<sockaddr>, addrlen: UnsafeMutablePointer<socklen_t>) throws -> IOResult<ssize_t> {
         return try wrapSyscallMayBlock {
             sysRecvFrom(descriptor, pointer, len, 0, addr, addrlen)
         }
@@ -373,7 +376,7 @@ internal enum Posix {
         }
     }
 
-    // Its not really posix but exists on Linux and MacOS / BSD so just put it here for now to keep it simple
+    // It's not really posix but exists on Linux and MacOS / BSD so just put it here for now to keep it simple
     @inline(never)
     public static func sendfile(descriptor: CInt, fd: CInt, offset: off_t, count: size_t) throws -> IOResult<Int> {
         var written: off_t = 0

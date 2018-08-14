@@ -230,12 +230,14 @@ class ByteBufferTest: XCTestCase {
         XCTAssertEqual(5, buf.writerIndex)
     }
 
+    @available(*, deprecated, message: "Tests deprecated function changeCapacity(to:)")
     func testChangeCapacityWhenEnoughAvailable() throws {
         let oldCapacity = buf.capacity
         buf.changeCapacity(to: buf.capacity - 1)
         XCTAssertLessThanOrEqual(buf.capacity, oldCapacity)
     }
 
+    @available(*, deprecated, message: "Tests deprecated function changeCapacity(to:)")
     func testChangeCapacityWhenNotEnoughMaxCapacity() throws {
         buf = allocator.buffer(capacity: 16)
         let oldCapacity = buf.capacity
@@ -472,7 +474,7 @@ class ByteBufferTest: XCTestCase {
                 XCTAssertEqual(string.utf8.count, ptr.count)
 
                 for (idx, expected) in zip(0..<string.utf8.count, string.utf8) {
-                    let actual = ptr.baseAddress!.advanced(by: idx).assumingMemoryBound(to: UInt8.self).pointee
+                    let actual = ptr[idx]
                     XCTAssertEqual(expected, actual, "character at index \(idx) is \(actual) but should be \(expected)")
                 }
             }
@@ -589,6 +591,7 @@ class ByteBufferTest: XCTestCase {
         XCTAssertEqual(expected, buf.readData(length: cap)) /* to make sure it can work */
     }
 
+    @available(*, deprecated, message: "Tests deprecated function changeCapacity(to:)")
     func testChangeCapacityToSameCapacityRetainsCapacityAndPointers() throws {
         var buf = self.allocator.buffer(capacity: 1024)
         let cap = buf.capacity
@@ -636,7 +639,7 @@ class ByteBufferTest: XCTestCase {
         otherBuf?.withUnsafeReadableBytes { ptr in
             XCTAssertEqual(cap, ptr.count)
             for i in 0..<cap {
-                XCTAssertEqual(ptr.baseAddress!.assumingMemoryBound(to: UInt8.self)[i], UInt8(truncatingIfNeeded: i))
+                XCTAssertEqual(ptr[i], UInt8(truncatingIfNeeded: i))
             }
         }
     }
@@ -675,13 +678,13 @@ class ByteBufferTest: XCTestCase {
         buf!.withUnsafeReadableBytes { ptr in
             XCTAssertEqual(cap, ptr.count)
             for i in 0..<cap {
-                XCTAssertEqual(ptr.baseAddress!.assumingMemoryBound(to: UInt8.self)[i], 0)
+                XCTAssertEqual(ptr[i], 0)
             }
         }
         otherBuf!.withUnsafeReadableBytes { ptr in
             XCTAssertEqual(cap, ptr.count)
             for i in 0..<cap {
-                XCTAssertEqual(ptr.baseAddress!.assumingMemoryBound(to: UInt8.self)[i], UInt8(truncatingIfNeeded: i))
+                XCTAssertEqual(ptr[i], UInt8(truncatingIfNeeded: i))
             }
         }
     }
@@ -795,8 +798,9 @@ class ByteBufferTest: XCTestCase {
         buf.write(string: str)
         var written1: Int = -1
         var written2: Int = -1
+        let hwDataCount = hwData.count
         hwData.withUnsafeBytes { (ptr: UnsafePointer<Int8>) -> Void in
-            let ptr = UnsafeRawBufferPointer(start: ptr, count: hwData.count)
+            let ptr = UnsafeRawBufferPointer(start: ptr, count: hwDataCount)
             /* ... write a second time and ...*/
             written1 = buf.set(bytes: ptr, at: buf.writerIndex)
             buf.moveWriterIndex(forwardBy: written1)
@@ -867,7 +871,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testReadWriteBytesOkay() throws {
-        buf.changeCapacity(to: 24)
+        buf.reserveCapacity(24)
         buf.clear()
         let capacity = buf.capacity
         for i in 0..<capacity {
@@ -886,7 +890,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testReadWithUnsafeReadableBytesVariantsNothingToRead() throws {
-        buf.changeCapacity(to: 1024)
+        buf.reserveCapacity(1024)
         buf.clear()
         XCTAssertEqual(0, buf.readerIndex)
         XCTAssertEqual(0, buf.writerIndex)
@@ -917,7 +921,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testReadWithUnsafeReadableBytesVariantsSomethingToRead() throws {
-        buf.changeCapacity(to: 1)
+        var buf = ByteBufferAllocator().buffer(capacity: 1)
         buf.clear()
         buf.write(bytes: [1, 2, 3, 4, 5, 6, 7, 8])
         XCTAssertEqual(0, buf.readerIndex)
@@ -952,7 +956,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testSomePotentialIntegerUnderOrOverflows() throws {
-        buf.changeCapacity(to: 1024)
+        buf.reserveCapacity(1024)
         buf.write(staticString: "hello world, just some trap bytes here")
 
         func testIndexAndLengthFunc<T>(_ body: (Int, Int) -> T?, file: StaticString = #file, line: UInt = #line) {
@@ -1033,8 +1037,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testSetIntegerBeyondCapacity() throws {
-        buf.clear()
-        buf.changeCapacity(to: 32)
+        var buf = ByteBufferAllocator().buffer(capacity: 32)
         XCTAssertLessThan(buf.capacity, 200)
 
         buf.set(integer: 17, at: 201)
@@ -1044,8 +1047,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testGetIntegerBeyondCapacity() throws {
-        buf.clear()
-        buf.changeCapacity(to: 32)
+        let buf = ByteBufferAllocator().buffer(capacity: 32)
         XCTAssertLessThan(buf.capacity, 200)
 
         let i: Int? = buf.getInteger(at: 201)
@@ -1053,8 +1055,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testSetStringBeyondCapacity() throws {
-        buf.clear()
-        buf.changeCapacity(to: 32)
+        var buf = ByteBufferAllocator().buffer(capacity: 32)
         XCTAssertLessThan(buf.capacity, 200)
 
         buf.set(string: "HW", at: 201)
@@ -1064,8 +1065,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testGetStringBeyondCapacity() throws {
-        buf.clear()
-        buf.changeCapacity(to: 32)
+        let buf = ByteBufferAllocator().buffer(capacity: 32)
         XCTAssertLessThan(buf.capacity, 200)
 
         let i: String? = buf.getString(at: 201, length: 1)
@@ -1092,8 +1092,7 @@ class ByteBufferTest: XCTestCase {
     }
 
     func testWritableBytesAccountsForSlicing() throws {
-        buf.clear()
-        buf.changeCapacity(to: 32)
+        let buf = ByteBufferAllocator().buffer(capacity: 32)
         XCTAssertEqual(buf.capacity, 32)
         XCTAssertEqual(buf.writableBytes, 32)
 
@@ -1496,6 +1495,115 @@ class ByteBufferTest: XCTestCase {
         XCTAssertEqual(3, buf.readableBytes)
         XCTAssertEqual([0xff, 0xff, 0xff], buf.readBytes(length: buf.readableBytes)!)
     }
+
+    func testReserveCapacityWhenOversize() throws {
+        let oldCapacity = buf.capacity
+        let oldPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        buf.reserveCapacity(oldCapacity - 1)
+        let newPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertEqual(buf.capacity, oldCapacity)
+        XCTAssertEqual(oldPtrVal, newPtrVal)
+    }
+
+    func testReserveCapacitySameCapacity() throws {
+        let oldCapacity = buf.capacity
+        let oldPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        buf.reserveCapacity(oldCapacity)
+        let newPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertEqual(buf.capacity, oldCapacity)
+        XCTAssertEqual(oldPtrVal, newPtrVal)
+    }
+
+    func testReserveCapacityLargerUniquelyReferencedCallsRealloc() throws {
+        testReserveCapacityLarger_reallocCount = 0
+        testReserveCapacityLarger_mallocCount = 0
+
+        let alloc = ByteBufferAllocator(hookedMalloc: testReserveCapacityLarger_mallocHook,
+                                        hookedRealloc: testReserveCapacityLarger_reallocHook,
+                                        hookedFree: testReserveCapacityLarger_freeHook,
+                                        hookedMemcpy: testReserveCapacityLarger_memcpyHook)
+        var buf = alloc.buffer(capacity: 16)
+
+
+        let oldCapacity = buf.capacity
+        let oldPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertEqual(testReserveCapacityLarger_mallocCount, 1)
+        XCTAssertEqual(testReserveCapacityLarger_reallocCount, 0)
+        buf.reserveCapacity(32)
+        XCTAssertEqual(testReserveCapacityLarger_mallocCount, 1)
+        XCTAssertEqual(testReserveCapacityLarger_reallocCount, 1)
+
+        let newPtrVal = buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertNotEqual(buf.capacity, oldCapacity)
+        XCTAssertNotEqual(oldPtrVal, newPtrVal)
+    }
+
+    func testReserveCapacityLargerMultipleReferenceCallsMalloc() throws {
+        testReserveCapacityLarger_reallocCount = 0
+        testReserveCapacityLarger_mallocCount = 0
+
+        let alloc = ByteBufferAllocator(hookedMalloc: testReserveCapacityLarger_mallocHook,
+                                        hookedRealloc: testReserveCapacityLarger_reallocHook,
+                                        hookedFree: testReserveCapacityLarger_freeHook,
+                                        hookedMemcpy: testReserveCapacityLarger_memcpyHook)
+        var buf = alloc.buffer(capacity: 16)
+        let bufCopy = buf
+
+        withExtendedLifetime(bufCopy) {
+            let oldCapacity = buf.capacity
+            let oldPtrVal = buf.withVeryUnsafeBytes {
+                UInt(bitPattern: $0.baseAddress!)
+            }
+
+            XCTAssertEqual(testReserveCapacityLarger_mallocCount, 1)
+            XCTAssertEqual(testReserveCapacityLarger_reallocCount, 0)
+            buf.reserveCapacity(32)
+            XCTAssertEqual(testReserveCapacityLarger_mallocCount, 2)
+            XCTAssertEqual(testReserveCapacityLarger_reallocCount, 0)
+
+            let newPtrVal = buf.withVeryUnsafeBytes {
+                UInt(bitPattern: $0.baseAddress!)
+            }
+
+            XCTAssertNotEqual(buf.capacity, oldCapacity)
+            XCTAssertNotEqual(oldPtrVal, newPtrVal)
+        }
+    }
+
+    func testReadWithFunctionsThatReturnNumberOfReadBytesAreDiscardable() {
+        var buf = self.buf!
+        buf.write(string: "ABCD")
+
+        /* deliberately not ignoring the result */ buf.readWithUnsafeReadableBytes { buffer in
+            XCTAssertEqual(4, buffer.count)
+            return 2
+        }
+
+        /* deliberately not ignoring the result */ buf.readWithUnsafeMutableReadableBytes { buffer in
+            XCTAssertEqual(2, buffer.count)
+            return 2
+        }
+
+        XCTAssertEqual(0, buf.readableBytes)
+    }
 }
 
 private enum AllocationExpectationState: Int {
@@ -1529,4 +1637,25 @@ private func testAllocationOfReallyBigByteBuffer_reallocHook(_ ptr: UnsafeMutabl
 
 private func testAllocationOfReallyBigByteBuffer_memcpyHook(_ dst: UnsafeMutableRawPointer, _ src: UnsafeRawPointer, _ count: Int) -> Void {
     /* not actually doing any copies */
+}
+
+
+private var testReserveCapacityLarger_reallocCount = 0
+private var testReserveCapacityLarger_mallocCount = 0
+private func testReserveCapacityLarger_freeHook( _ ptr: UnsafeMutableRawPointer?) -> Void {
+    free(ptr)
+}
+
+private func testReserveCapacityLarger_mallocHook(_ size: Int) -> UnsafeMutableRawPointer? {
+    testReserveCapacityLarger_mallocCount += 1
+    return malloc(size)
+}
+
+private func testReserveCapacityLarger_reallocHook(_ ptr: UnsafeMutableRawPointer?, _ count: Int) -> UnsafeMutableRawPointer? {
+    testReserveCapacityLarger_reallocCount += 1
+    return realloc(ptr, count)
+}
+
+private func testReserveCapacityLarger_memcpyHook(_ dst: UnsafeMutableRawPointer, _ src: UnsafeRawPointer, _ count: Int) -> Void {
+    // No copying
 }

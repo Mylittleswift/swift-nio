@@ -405,7 +405,8 @@ class NonBlockingFileIOTest: XCTestCase {
         try withPipe { readFH, writeFH in
             do {
                 try readFH.withUnsafeFileDescriptor { readFD in
-                    try Posix.fcntl(descriptor: readFD, command: F_SETFL, value: O_NONBLOCK)
+                    let ret = try Posix.fcntl(descriptor: readFD, command: F_SETFL, value: O_NONBLOCK)
+                    assert(ret == 0, "unexpectedly, fcntl(\(readFD), F_SETFL, O_NONBLOCK) returned \(ret)")
                 }
                 try self.fileIO.readChunked(fileHandle: readFH,
                                             byteCount: 10,
@@ -448,6 +449,27 @@ class NonBlockingFileIOTest: XCTestCase {
                 }.wait()
         }
         XCTAssertEqual(2, numCalls)
+    }
+
+    func testWriting() throws {
+        var buffer = allocator.buffer(capacity: 3)
+        buffer.write(staticString: "123")
+
+        try withTemporaryFile(content: "") { (fileHandle, path) in
+            try self.fileIO.write(fileHandle: fileHandle,
+                                  buffer: buffer,
+                                  eventLoop: self.eventLoop).wait()
+            let offset = try fileHandle.withUnsafeFileDescriptor {
+                try Posix.lseek(descriptor: $0, offset: 0, whence: SEEK_SET)
+            }
+            XCTAssertEqual(offset, 0)
+
+            let readBuffer = try self.fileIO.read(fileHandle: fileHandle,
+                                                  byteCount: 3,
+                                                  allocator: self.allocator,
+                                                  eventLoop: self.eventLoop).wait()
+            XCTAssertEqual(readBuffer.getString(at: 0, length: 3), "123")
+        }
     }
 
     func testFileOpenWorks() throws {

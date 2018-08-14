@@ -12,8 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-@testable import NIO
+import Dispatch
 import XCTest
+
+@testable import NIO
 
 func withPipe(_ body: (NIO.FileHandle, NIO.FileHandle) -> [NIO.FileHandle]) throws {
     var fds: [Int32] = [-1, -1]
@@ -133,7 +135,7 @@ final class NonAcceptingServerSocket: ServerSocket {
     private var errors: [Int32]
 
     init(errors: [Int32]) throws {
-        // Reverse so its cheaper to remove errors.
+        // Reverse so it's cheaper to remove errors.
         self.errors = errors.reversed()
         try super.init(protocolFamily: AF_INET, setNonBlocking: true)
     }
@@ -166,15 +168,55 @@ func assertSetGetOptionOnOpenAndClosed<T: ChannelOption>(channel: Channel, optio
     }
 }
 
-func assertNoThrowWithValue<T>(_ body: @autoclosure () throws -> T, defaultValue: T? = nil, file: StaticString = #file, line: UInt = #line) throws -> T {
+func assertNoThrowWithValue<T>(_ body: @autoclosure () throws -> T, defaultValue: T? = nil, message: String? = nil, file: StaticString = #file, line: UInt = #line) throws -> T {
     do {
         return try body()
     } catch {
-        XCTFail("unexpected error \(error) thrown", file: file, line: line)
+        XCTFail("\(message.map { $0 + ": " } ?? "")unexpected error \(error) thrown", file: file, line: line)
         if let defaultValue = defaultValue {
             return defaultValue
         } else {
             throw error
         }
+    }
+}
+
+func resolverDebugInformation(eventLoop: EventLoop, host: String, previouslyReceivedResult: SocketAddress) throws -> String {
+    func printSocketAddress(_ socketAddress: SocketAddress) -> String {
+        switch socketAddress {
+        case .unixDomainSocket(_):
+            return "uds"
+        case .v4(let sa):
+            var addr = sa.address
+            return addr.addressDescription()
+        case .v6(let sa):
+            var addr = sa.address
+            return addr.addressDescription()
+        }
+    }
+    let res = GetaddrinfoResolver(loop: eventLoop, aiSocktype: Posix.SOCK_STREAM, aiProtocol: Posix.IPPROTO_TCP)
+    let ipv6Results = try assertNoThrowWithValue(res.initiateAAAAQuery(host: host, port: 0).wait()).map(printSocketAddress)
+    let ipv4Results = try assertNoThrowWithValue(res.initiateAQuery(host: host, port: 0).wait()).map(printSocketAddress)
+
+    return """
+    when trying to resolve '\(host)' we've got the following results:
+    - previous try: \(printSocketAddress(previouslyReceivedResult))
+    - all results:
+    IPv4: \(ipv4Results)
+    IPv6: \(ipv6Results)
+    """
+}
+
+func assert(_ condition: @autoclosure () -> Bool, within time: TimeAmount, testInterval: TimeAmount? = nil, _ message: String = "condition not satisfied in time", file: StaticString = #file, line: UInt = #line) {
+    let testInterval = testInterval ?? TimeAmount.nanoseconds(time.nanoseconds / 5)
+    let endTime = DispatchTime.now().uptimeNanoseconds + UInt64(time.nanoseconds)
+
+    repeat {
+        if condition() { return }
+        usleep(UInt32(testInterval.nanoseconds / 1000))
+    } while (DispatchTime.now().uptimeNanoseconds < endTime)
+
+    if !condition() {
+        XCTFail(message)
     }
 }
