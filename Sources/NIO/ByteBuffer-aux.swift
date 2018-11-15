@@ -131,7 +131,7 @@ extension ByteBuffer {
             guard index <= pointer.count - length else {
                 return nil
             }
-            return String(decoding: pointer[index..<(index+length)], as: UTF8.self)
+            return String(decoding: UnsafeRawBufferPointer(rebasing: pointer[index..<(index+length)]), as: UTF8.self)
         }
     }
 
@@ -277,7 +277,7 @@ extension ByteBuffer {
     ///
     /// - returns: A `ByteBuffer` sharing storage containing the readable bytes only.
     public func slice() -> ByteBuffer {
-        return getSlice(at: self.readerIndex, length: self.readableBytes)!
+        return getSlice(at: self.readerIndex, length: self.readableBytes)! // must work, bytes definitely in the buffer
     }
 
     /// Slice `length` bytes off this `ByteBuffer` and move the reader index forward by `length`.

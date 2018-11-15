@@ -76,7 +76,7 @@ public final class RepeatedTask {
     }
 
     private func begin0(in delay: TimeAmount) {
-        assert(self.eventLoop.inEventLoop)
+        self.eventLoop.assertInEventLoop()
         guard let task = self.task else {
             return
         }
@@ -103,14 +103,14 @@ public final class RepeatedTask {
     }
 
     private func cancel0() {
-        assert(self.eventLoop.inEventLoop)
+        self.eventLoop.assertInEventLoop()
         self.scheduled?.cancel()
         self.scheduled = nil
         self.task = nil
     }
 
     private func reschedule() {
-        assert(self.eventLoop.inEventLoop)
+        self.eventLoop.assertInEventLoop()
         guard let scheduled = self.scheduled else {
             return
         }
@@ -127,7 +127,7 @@ public final class RepeatedTask {
     }
 
     private func reschedule0() {
-        assert(self.eventLoop.inEventLoop)
+        self.eventLoop.assertInEventLoop()
         guard self.task != nil else {
             return
         }
@@ -208,7 +208,12 @@ public protocol EventLoop: EventLoopGroup {
     func submit<T>(_ task: @escaping () throws -> T) -> EventLoopFuture<T>
 
     /// Schedule a `task` that is executed by this `SelectableEventLoop` after the given amount of time.
+    @discardableResult
     func scheduleTask<T>(in: TimeAmount, _ task: @escaping () throws -> T) -> Scheduled<T>
+
+    /// Checks that this call is run from the `EventLoop`. If this is called from within the `EventLoop` this function
+    /// will have no effect, if called from outside the `EventLoop` it will crash the process with a trap.
+    func preconditionInEventLoop(file: StaticString, line: UInt)
 }
 
 /// Represents a time _interval_.
@@ -216,10 +221,13 @@ public protocol EventLoop: EventLoopGroup {
 /// - note: `TimeAmount` should not be used to represent a point in time.
 public struct TimeAmount {
   
-    #if arch(arm) // 32-bit, Raspi/AppleWatch/etc
-        public typealias Value = Int64
-    #else // 64-bit, keeping that at Int for SemVer in the 1.x line.
-        public typealias Value = Int
+    #if arch(arm) || arch(i386)
+    // Int64 is the correct type here but we don't want to break SemVer so can't change it for the 64-bit platforms.
+    // To be fixed in NIO 2.0
+    public typealias Value = Int64
+    #else
+    // 64-bit, keeping that at Int for SemVer in the 1.x line.
+    public typealias Value = Int
     #endif
 
     /// The nanoseconds representation of the `TimeAmount`.
@@ -381,6 +389,22 @@ extension EventLoop {
     public func makeIterator() -> EventLoopIterator? {
         return EventLoopIterator([self])
     }
+
+    /// Checks that this call is run from the EventLoop. If this is called from within the EventLoop this function will
+    /// have no effect, if called from outside the EventLoop it will crash the process with a trap if run in debug mode.
+    /// In release mode this function never has any effect.
+    ///
+    /// - note: This is not a customization point so calls to this function can be fully optimized out in release mode.
+    @_inlineable
+    public func assertInEventLoop(file: StaticString = #file, line: UInt = #line) {
+        debugOnly {
+            self.preconditionInEventLoop(file: file, line: line)
+        }
+    }
+
+    public func preconditionInEventLoop(file: StaticString = #file, line: UInt = #line) {
+        precondition(self.inEventLoop, file: file, line: line)
+    }
 }
 
 /// Internal representation of a `Registration` to an `Selector`.
@@ -505,14 +529,14 @@ internal final class SelectableEventLoop: EventLoop {
 
     /// Is this `SelectableEventLoop` still open (ie. not shutting down or shut down)
     internal var isOpen: Bool {
-        assert(self.inEventLoop)
+        self.assertInEventLoop()
         return self.lifecycleState == .open
     }
 
     /// Register the given `SelectableChannel` with this `SelectableEventLoop`. After this point all I/O for the `SelectableChannel` will be processed by this `SelectableEventLoop` until it
     /// is deregistered by calling `deregister`.
     public func register<C: SelectableChannel>(channel: C) throws {
-        assert(inEventLoop)
+        self.assertInEventLoop()
 
         // Don't allow registration when we're closed.
         guard self.lifecycleState == .open else {
@@ -524,7 +548,7 @@ internal final class SelectableEventLoop: EventLoop {
 
     /// Deregister the given `SelectableChannel` from this `SelectableEventLoop`.
     public func deregister<C: SelectableChannel>(channel: C) throws {
-        assert(inEventLoop)
+        self.assertInEventLoop()
         guard lifecycleState == .open else {
             // It's possible the EventLoop was closed before we were able to call deregister, so just return in this case as there is no harm.
             return
@@ -535,7 +559,7 @@ internal final class SelectableEventLoop: EventLoop {
     /// Register the given `SelectableChannel` with this `SelectableEventLoop`. This should be done whenever `channel.interestedEvents` has changed and it should be taken into account when
     /// waiting for new I/O for the given `SelectableChannel`.
     public func reregister<C: SelectableChannel>(channel: C) throws {
-        assert(inEventLoop)
+        self.assertInEventLoop()
         try selector.reregister(selectable: channel.selectable, interested: channel.interestedEvent)
     }
 
@@ -633,7 +657,7 @@ internal final class SelectableEventLoop: EventLoop {
 
     /// Start processing I/O and tasks for this `SelectableEventLoop`. This method will continue running (and so block) until the `SelectableEventLoop` is closed.
     public func run() throws {
-        precondition(self.inEventLoop, "tried to run the EventLoop on the wrong thread.")
+        self.preconditionInEventLoop()
         defer {
             var scheduledTasksCopy = ContiguousArray<ScheduledTask>()
             tasksLock.withLockVoid {
@@ -677,7 +701,7 @@ internal final class SelectableEventLoop: EventLoop {
                         // Make a copy of the tasks so we can execute these while not holding the lock anymore
                         while tasksCopy.count < tasksCopy.capacity, let task = scheduledTasks.peek() {
                             if task.readyIn(now) <= .nanoseconds(0) {
-                                _ = scheduledTasks.pop()
+                                scheduledTasks.pop()
                                 tasksCopy.append(task.task)
                             } else {
                                 nextReadyTask = task
@@ -734,7 +758,7 @@ internal final class SelectableEventLoop: EventLoop {
             return closeGently0()
         } else {
             let p: EventLoopPromise<Void> = self.newPromise()
-            _ = self.submit {
+            self.execute {
                 closeGently0().cascade(promise: p)
             }
             return p.futureResult
@@ -823,6 +847,18 @@ extension EventLoopGroup {
 typealias ThreadInitializer = (Thread) -> Void
 
 /// An `EventLoopGroup` which will create multiple `EventLoop`s, each tied to its own `Thread`.
+///
+/// The effect of initializing a `MultiThreadedEventLoopGroup` is to spawn `numberOfThreads` fresh threads which will
+/// all run their own `EventLoop`. Those threads will not be shut down until `shutdownGracefully` or
+/// `syncShutdownGracefully` is called.
+///
+/// - note: It's good style to call `MultiThreadedEventLoopGroup.shutdownGracefully` or
+///         `MultiThreadedEventLoopGroup.syncShutdownGracefully` when you no longer need this `EventLoopGroup`. In
+///         many cases that is just before your program exits.
+/// - warning: Unit tests often spawn one `MultiThreadedEventLoopGroup` per unit test to force isolation between the
+///            tests. In those cases it's important to shut the `MultiThreadedEventLoopGroup` down at the end of the
+///            test. A good place to start a `MultiThreadedEventLoopGroup` is the `setUp` method of your `XCTestCase`
+///            subclass, a good place to shut it down is the `tearDown` method.
 final public class MultiThreadedEventLoopGroup: EventLoopGroup {
 
     private static let threadSpecificEventLoop = ThreadSpecificVariable<SelectableEventLoop>()
@@ -863,6 +899,11 @@ final public class MultiThreadedEventLoopGroup: EventLoopGroup {
     }
 
     /// Creates a `MultiThreadedEventLoopGroup` instance which uses `numberOfThreads`.
+    ///
+    /// - note: Don't forget to call `shutdownGracefully` or `syncShutdownGracefully` when you no longer need this
+    ///         `EventLoopGroup`. If you forget to shut the `EventLoopGroup` down you will leak `numberOfThreads`
+    ///         (kernel) threads which are costly resources. This is especially important in unit tests where one
+    ///         `MultiThreadedEventLoopGroup` is started per test case.
     ///
     /// - arguments:
     ///     - numberOfThreads: The number of `Threads` to use.
@@ -916,11 +957,18 @@ final public class MultiThreadedEventLoopGroup: EventLoopGroup {
     internal func unsafeClose() throws {
         for loop in eventLoops {
             // TODO: Should we log this somehow or just rethrow the first error ?
-            _ = try loop.close0()
+            try loop.close0()
         }
     }
 
-    public func shutdownGracefully(queue: DispatchQueue, _ callback: @escaping (Error?) -> Void) {
+    /// Shut this `MultiThreadedEventLoopGroup` down which causes the `EventLoop`s and their associated threads to be
+    /// shut down and release their resources.
+    ///
+    /// - parameters:
+    ///    - queue: The `DispatchQueue` to run `handler` on when the shutdown operation completes.
+    ///    - handler: The handler which is called after the shutdown operation completes. The parameter will be `nil`
+    ///               on success and contain the `Error` otherwise.
+    public func shutdownGracefully(queue: DispatchQueue, _ handler: @escaping (Error?) -> Void) {
         // This method cannot perform its final cleanup using EventLoopFutures, because it requires that all
         // our event loops still be alive, and they may not be. Instead, we use Dispatch to manage
         // our shutdown signaling, and then do our cleanup once the DispatchQueue is empty.
@@ -940,13 +988,13 @@ final public class MultiThreadedEventLoopGroup: EventLoopGroup {
         g.notify(queue: q) {
             let failure = self.eventLoops.map { try? $0.close0() }.filter { $0 == nil }.count > 0
 
-            // TODO: In the next major release we should join in the Thread used by the EventLoop before invoking the callback to ensure
-            //       it is really gone.
+            // TODO: For Swift NIO 2.0 we should join in the threads used by the EventLoop before invoking the callback
+            //       to ensure they're really gone (#581).
             if failure {
                 error = EventLoopError.shutdownFailed
             }
 
-            callback(error)
+            handler(error)
         }
     }
 }

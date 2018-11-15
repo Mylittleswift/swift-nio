@@ -22,7 +22,7 @@ public struct PriorityQueue<Element: Comparable> {
 
     public mutating func remove(_ key: Element) {
         assert(self.heap.checkHeapProperty(), "broken heap: \(self.heap.debugDescription)")
-        _ = self.heap.remove(value: key)
+        self.heap.remove(value: key)
         assert(self.heap.checkHeapProperty(), "broken heap: \(self.heap.debugDescription)")
     }
 
@@ -87,7 +87,7 @@ extension PriorityQueue: Sequence {
 @available(*, deprecated, message: "The NIOPriorityQueue module is deprecated and will be removed in the next major release.")
 public extension PriorityQueue {
     @available(*, deprecated, message: "The NIOPriorityQueue module is deprecated and will be removed in the next major release.")
-    public var count: Int {
+    var count: Int {
         return self.heap.count
     }
 }

@@ -71,7 +71,7 @@ Additionally, SwiftNIO ships with a few [`Channel`][c] implementations. In parti
 
 ##### A Note on Blocking
 
-One of the important notes about [`ChannelPipeline`][cp]s is that they are not thread-safe. This is very important for writing SwiftNIO applications, as it allows you to write much simpler [`ChannelHandler`][ch]s in the knowledge that they will not require synchronization.
+One of the important notes about [`ChannelPipeline`][cp]s is that they are thread-safe. This is very important for writing SwiftNIO applications, as it allows you to write much simpler [`ChannelHandler`][ch]s in the knowledge that they will not require synchronization.
 
 However, this is achieved by dispatching all code on the [`ChannelPipeline`][cp] on the same thread as the [`EventLoop`][el]. This means that, as a general rule, [`ChannelHandler`][ch]s **must not** call blocking code without dispatching it to a background thread. If a [`ChannelHandler`][ch] blocks for any reason, all [`Channel`][c]s attached to the parent [`EventLoop`][el] will be unable to progress until the blocking call completes.
 
@@ -204,6 +204,37 @@ First make sure you have [Docker](https://www.docker.com/community-edition) inst
 ## Developing SwiftNIO
 
 For the most part, SwiftNIO development is as straightforward as any other SwiftPM project. With that said, we do have a few processes that are worth understanding before you contribute. For details, please see `CONTRIBUTING.md` in this repository.
+
+### Prerequisites
+
+To be able to compile and run SwiftNIO and the integration tests, you need to
+have a few prerequisites installed on your system.
+
+#### macOS
+
+- Xcode 9 or newer
+
+### Linux
+
+- Swift 4.0 or newer
+- zlib and its development headers
+- netcat (for integration tests only)
+- lsof (for integration tests only)
+- shasum (for integration tests only)
+
+#### Ubuntu
+
+```
+# install swift tarball from https://swift.org/downloads
+apt-get install -y zlib1g-dev netcat-openbsd lsof perl
+```
+
+
+### Fedora 28+
+
+```
+dnf install swift-lang zlib-devel /usr/bin/nc /usr/bin/lsof /usr/bin/shasum
+```
 
 [ch]: https://apple.github.io/swift-nio/docs/current/NIO/Protocols/ChannelHandler.html
 [c]: https://apple.github.io/swift-nio/docs/current/NIO/Protocols/Channel.html

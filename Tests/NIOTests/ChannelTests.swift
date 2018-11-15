@@ -158,10 +158,12 @@ public class ChannelTests: XCTestCase {
             buffer.write(staticString: "a")
         }
 
-        var written = 0
-        while written <= Int(INT32_MAX) {
+
+        let lotsOfData = Int(Int32.max)
+        var written: Int64 = 0
+        while written <= lotsOfData {
             clientChannel.write(NIOAny(buffer), promise: nil)
-            written += bufferSize
+            written += Int64(bufferSize)
         }
 
         XCTAssertNoThrow(try clientChannel.writeAndFlush(NIOAny(buffer)).wait())
@@ -208,7 +210,7 @@ public class ChannelTests: XCTestCase {
             var iovecs: [IOVector] = Array(repeating: iovec(), count: Socket.writevLimitIOVectors + 1)
             var managed: [Unmanaged<AnyObject>] = Array(repeating: Unmanaged.passUnretained(o), count: Socket.writevLimitIOVectors + 1)
             /* put a canary value at the end */
-            iovecs[iovecs.count - 1] = iovec(iov_base: UnsafeMutableRawPointer(bitPattern: 0xdeadbeef)!, iov_len: 0xdeadbeef)
+            iovecs[iovecs.count - 1] = iovec(iov_base: UnsafeMutableRawPointer(bitPattern: 0xdeadbee)!, iov_len: 0xdeadbee)
             try iovecs.withUnsafeMutableBufferPointer { iovecs in
                 try managed.withUnsafeMutableBufferPointer { managed in
                     let pwm = NIO.PendingStreamWritesManager(iovecs: iovecs, storageRefs: managed)
@@ -225,8 +227,8 @@ public class ChannelTests: XCTestCase {
             }
             /* assert that the canary values are still okay, we should definitely have never written those */
             XCTAssertEqual(managed.last!.toOpaque(), Unmanaged.passUnretained(o).toOpaque())
-            XCTAssertEqual(0xdeadbeef, Int(bitPattern: iovecs.last!.iov_base))
-            XCTAssertEqual(0xdeadbeef, iovecs.last!.iov_len)
+            XCTAssertEqual(0xdeadbee, Int(bitPattern: iovecs.last!.iov_base))
+            XCTAssertEqual(0xdeadbee, iovecs.last!.iov_len)
         }
     }
 
@@ -284,7 +286,7 @@ public class ChannelTests: XCTestCase {
             if let expected = expectedVectorWritabilities {
                 if expected.count > multiState {
                     XCTAssertGreaterThan(returns.count, everythingState)
-                    XCTAssertEqual(expected[multiState], ptrs.map { $0.iov_len },
+                    XCTAssertEqual(expected[multiState], ptrs.map { numericCast($0.iov_len) },
                                    "in vector write \(multiState) (overall \(everythingState)), \(expected[multiState]) byte counts expected but \(ptrs.map { $0.iov_len }) actual",
                         file: file, line: line)
                     return returns[everythingState]
@@ -664,8 +666,8 @@ public class ChannelTests: XCTestCase {
     /// Test that with a few massive buffers, we don't offer more than we should to `writev` if the individual chunks fit.
     func testPendingWritesNoMoreThanWritevLimitIsWritten() throws {
         let el = EmbeddedEventLoop()
-        let alloc = ByteBufferAllocator(hookedMalloc: { _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbeef)! },
-                                        hookedRealloc: { _, _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbeef)! },
+        let alloc = ByteBufferAllocator(hookedMalloc: { _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbee)! },
+                                        hookedRealloc: { _, _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbee)! },
                                         hookedFree: { _ in },
                                         hookedMemcpy: { _, _, _ in })
         /* each buffer is half the writev limit */
@@ -695,12 +697,16 @@ public class ChannelTests: XCTestCase {
 
     /// Test that with a massive buffers (bigger than writev size), we don't offer more than we should to `writev`.
     func testPendingWritesNoMoreThanWritevLimitIsWrittenInOneMassiveChunk() throws {
+        if MemoryLayout<Int>.size == MemoryLayout<Int32>.size  { // skip this test on 32bit system
+            return
+        }
+
         let el = EmbeddedEventLoop()
-        let alloc = ByteBufferAllocator(hookedMalloc: { _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbeef)! },
-                                        hookedRealloc: { _, _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbeef)! },
+        let alloc = ByteBufferAllocator(hookedMalloc: { _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbee)! },
+                                        hookedRealloc: { _, _ in UnsafeMutableRawPointer(bitPattern: 0xdeadbee)! },
                                         hookedFree: { _ in },
                                         hookedMemcpy: { _, _, _ in })
-        /* each buffer is half the writev limit */
+
         let biggerThanWriteV = Socket.writevLimitBytes + 23
         var buffer = alloc.buffer(capacity: biggerThanWriteV)
         buffer.moveReaderIndex(to: 0)
@@ -1061,8 +1067,9 @@ public class ChannelTests: XCTestCase {
             } else {
                 XCTFail()
             }
-        } catch let err as IOError where err.errnoCode == ENETDOWN || err.errnoCode == ENETUNREACH {
+        } catch let err as IOError where err.errnoCode == ENETDOWN || err.errnoCode == ENETUNREACH || err.errnoCode == ECONNREFUSED {
             // we need to accept those too unfortunately
+            print("WARNING: \(#function) did not meaningfully test anything, received \(err)")
         } catch {
             XCTFail("unexpected error \(error)")
         }
@@ -1086,8 +1093,9 @@ public class ChannelTests: XCTestCase {
             } else {
                 XCTFail()
             }
-        } catch let err as IOError where err.errnoCode == ENETDOWN || err.errnoCode == ENETUNREACH {
+        } catch let err as IOError where err.errnoCode == ENETDOWN || err.errnoCode == ENETUNREACH || err.errnoCode == ECONNREFUSED {
             // we need to accept those too unfortunately
+            print("WARNING: \(#function) did not meaningfully test anything, received \(err)")
         } catch {
             XCTFail("unexpected error \(error)")
         }
@@ -2447,6 +2455,199 @@ public class ChannelTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    func testCloseInReadTriggeredByDrainingTheReceiveBufferBecauseOfWriteError() throws {
+        final class WriteWhenActiveHandler: ChannelInboundHandler {
+            typealias InboundIn = ByteBuffer
+            typealias OutboundOut = ByteBuffer
+
+            let channelAvailablePromise: EventLoopPromise<Channel>
+
+            init(channelAvailablePromise: EventLoopPromise<Channel>) {
+                self.channelAvailablePromise = channelAvailablePromise
+            }
+
+            func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
+                let buffer = self.unwrapInboundIn(data)
+                XCTFail("unexpected read: \(String(decoding: buffer.readableBytesView, as: UTF8.self))")
+            }
+
+            func channelActive(ctx: ChannelHandlerContext) {
+                var buffer = ctx.channel.allocator.buffer(capacity: 1)
+                buffer.write(staticString: "X")
+                ctx.channel.writeAndFlush(self.wrapOutboundOut(buffer)).map { ctx.channel }.cascade(promise: self.channelAvailablePromise)
+            }
+        }
+
+        final class WriteAlwaysFailingSocket: Socket {
+            init() throws {
+                try super.init(protocolFamily: AF_INET, type: Posix.SOCK_STREAM, setNonBlocking: true)
+            }
+
+            override func write(pointer: UnsafeRawBufferPointer) throws -> IOResult<Int> {
+                throw IOError(errnoCode: ETXTBSY, function: "WriteAlwaysFailingSocket.write fake error")
+            }
+
+            override func writev(iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<Int> {
+                throw IOError(errnoCode: ETXTBSY, function: "WriteAlwaysFailingSocket.writev fake error")
+            }
+        }
+
+        final class MakeChannelInactiveInReadCausedByWriteErrorHandler: ChannelInboundHandler {
+            typealias InboundIn = ByteBuffer
+            typealias OutboundOut = ByteBuffer
+
+            let serverChannel: EventLoopFuture<Channel>
+            let allDonePromise: EventLoopPromise<Void>
+
+            init(serverChannel: EventLoopFuture<Channel>,
+                 allDonePromise: EventLoopPromise<Void>) {
+                self.serverChannel = serverChannel
+                self.allDonePromise = allDonePromise
+            }
+
+            func channelActive(ctx: ChannelHandlerContext) {
+                XCTAssert(serverChannel.eventLoop === ctx.eventLoop)
+                self.serverChannel.whenSuccess { serverChannel in
+                    // all of the following futures need to complete synchronously for this test to test the correct
+                    // thing. Therefore we keep track if we're still on the same stack frame.
+                    var inSameStackFrame = true
+                    defer {
+                        inSameStackFrame = false
+                    }
+
+                    XCTAssertTrue(serverChannel.isActive)
+                    // we allow auto-read again to make sure that the socket buffer is drained on write error
+                    // (cf. https://github.com/apple/swift-nio/issues/593)
+                    ctx.channel.setOption(option: ChannelOptions.autoRead, value: true).then {
+                        // let's trigger the write error
+                        var buffer = ctx.channel.allocator.buffer(capacity: 16)
+                        buffer.write(staticString: "THIS WILL FAIL ANYWAY")
+                        return ctx.writeAndFlush(self.wrapOutboundOut(buffer))
+                    }.map {
+                        XCTFail("this should have failed")
+                    }.whenFailure { error in
+                        XCTAssertEqual(ChannelError.ioOnClosedChannel, error as? ChannelError)
+                        XCTAssertTrue(inSameStackFrame)
+                        self.allDonePromise.succeed(result: ())
+                    }
+                }
+            }
+
+            func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
+                let buffer = self.unwrapInboundIn(data)
+                XCTAssertEqual("X", String(decoding: buffer.readableBytesView, as: UTF8.self))
+                ctx.close(promise: nil)
+            }
+        }
+
+        let singleThreadedELG = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer {
+            XCTAssertNoThrow(try singleThreadedELG.syncShutdownGracefully())
+        }
+        let serverChannelAvailablePromise: EventLoopPromise<Channel> = singleThreadedELG.next().newPromise()
+        let allDonePromise: EventLoopPromise<Void> = singleThreadedELG.next().newPromise()
+        let server = try assertNoThrowWithValue(ServerBootstrap(group: singleThreadedELG)
+            .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
+            .childChannelInitializer { channel in
+                channel.pipeline.add(handler: WriteWhenActiveHandler(channelAvailablePromise: serverChannelAvailablePromise))
+            }
+            .bind(host: "127.0.0.1", port: 0)
+            .wait())
+        defer {
+            XCTAssertNoThrow(try server.close().wait())
+        }
+
+        let c = try assertNoThrowWithValue(SocketChannel(socket: WriteAlwaysFailingSocket(),
+                                                         parent: nil,
+                                                         eventLoop: singleThreadedELG.next() as! SelectableEventLoop))
+        XCTAssertNoThrow(try c.setOption(option: ChannelOptions.autoRead, value: false).wait())
+        XCTAssertNoThrow(try c.setOption(option: ChannelOptions.allowRemoteHalfClosure, value: true).wait())
+        XCTAssertNoThrow(try c.pipeline.add(handler: MakeChannelInactiveInReadCausedByWriteErrorHandler(serverChannel: serverChannelAvailablePromise.futureResult,
+                                                                                                        allDonePromise: allDonePromise)).wait())
+        XCTAssertNoThrow(try c.register().wait())
+        XCTAssertNoThrow(try c.connect(to: server.localAddress!).wait())
+
+        XCTAssertNoThrow(try allDonePromise.futureResult.wait())
+        XCTAssertFalse(c.isActive)
+    }
+
+    func testApplyingTwoDistinctSocketOptionsOfSameTypeWorks() throws {
+        let singleThreadedELG = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer {
+            XCTAssertNoThrow(try singleThreadedELG.syncShutdownGracefully())
+        }
+        var numberOfAcceptedChannel = 0
+        var acceptedChannels: [EventLoopPromise<Channel>] = [singleThreadedELG.next().newPromise(),
+                                                             singleThreadedELG.next().newPromise(),
+                                                             singleThreadedELG.next().newPromise()]
+        let server = try assertNoThrowWithValue(ServerBootstrap(group: singleThreadedELG)
+            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_TIMESTAMP), value: 1)
+            .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_KEEPALIVE), value: 1)
+            .childChannelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
+            .childChannelInitializer { channel in
+                acceptedChannels[numberOfAcceptedChannel].succeed(result: channel)
+                numberOfAcceptedChannel += 1
+                return channel.eventLoop.newSucceededFuture(result: ())
+            }
+            .bind(host: "127.0.0.1", port: 0)
+            .wait())
+        defer {
+            XCTAssertNoThrow(try server.close().wait())
+        }
+        XCTAssertTrue(try getBoolSocketOption(channel: server, level: SOL_SOCKET, name: SO_REUSEADDR))
+        XCTAssertTrue(try getBoolSocketOption(channel: server, level: SOL_SOCKET, name: SO_TIMESTAMP))
+
+        let client1 = try assertNoThrowWithValue(ClientBootstrap(group: singleThreadedELG)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
+            .connect(to: server.localAddress!)
+            .wait())
+        let accepted1 = try assertNoThrowWithValue(acceptedChannels[0].futureResult.wait())
+        defer {
+            XCTAssertNoThrow(try client1.close().wait())
+        }
+        let client2 = try assertNoThrowWithValue(ClientBootstrap(group: singleThreadedELG)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .connect(to: server.localAddress!)
+            .wait())
+        let accepted2 = try assertNoThrowWithValue(acceptedChannels[0].futureResult.wait())
+        defer {
+            XCTAssertNoThrow(try client2.close().wait())
+        }
+        let client3 = try assertNoThrowWithValue(ClientBootstrap(group: singleThreadedELG)
+            .connect(to: server.localAddress!)
+            .wait())
+        let accepted3 = try assertNoThrowWithValue(acceptedChannels[0].futureResult.wait())
+        defer {
+            XCTAssertNoThrow(try client3.close().wait())
+        }
+
+        XCTAssertTrue(try getBoolSocketOption(channel: client1, level: SOL_SOCKET, name: SO_REUSEADDR))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: client1, level: IPPROTO_TCP, name: TCP_NODELAY))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted1, level: SOL_SOCKET, name: SO_KEEPALIVE))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted1, level: IPPROTO_TCP, name: TCP_NODELAY))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: client2, level: SOL_SOCKET, name: SO_REUSEADDR))
+
+        XCTAssertFalse(try getBoolSocketOption(channel: client2, level: IPPROTO_TCP, name: TCP_NODELAY))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted2, level: SOL_SOCKET, name: SO_KEEPALIVE))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted2, level: IPPROTO_TCP, name: TCP_NODELAY))
+
+        XCTAssertFalse(try getBoolSocketOption(channel: client3, level: SOL_SOCKET, name: SO_REUSEADDR))
+
+        XCTAssertFalse(try getBoolSocketOption(channel: client3, level: IPPROTO_TCP, name: TCP_NODELAY))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted3, level: SOL_SOCKET, name: SO_KEEPALIVE))
+
+        XCTAssertTrue(try getBoolSocketOption(channel: accepted3, level: IPPROTO_TCP, name: TCP_NODELAY))
+    }
 }
 
 fileprivate final class FailRegistrationAndDelayCloseHandler: ChannelOutboundHandler {
@@ -2500,5 +2701,14 @@ fileprivate class VerifyConnectionFailureHandler: ChannelInboundHandler {
         self.state = .unregistered
         self.allDone.succeed(result: ())
         ctx.fireChannelUnregistered()
+    }
+}
+
+extension SocketOption: Equatable {
+    public static func == (lhs: SocketOption, rhs: SocketOption) -> Bool {
+        switch (lhs, rhs) {
+        case (.const(let lLevel, let lName), .const(let rLevel, let rName)):
+            return lLevel == rLevel && lName == rName
+        }
     }
 }

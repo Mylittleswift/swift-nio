@@ -68,7 +68,9 @@ public final class BlockingIOThreadPool {
         self.lock.withLock {
             switch self.state {
             case .running(let items):
-                items.forEach { $0(.cancelled) }
+                queue.async {
+                    items.forEach { $0(.cancelled) }
+                }
                 self.state = .shuttingDown(Array(repeating: true, count: numberOfThreads))
                 (0..<numberOfThreads).forEach { _ in
                     self.semaphore.signal()
@@ -162,9 +164,18 @@ public final class BlockingIOThreadPool {
         self.queues.enumerated().forEach { idAndQueue in
             let id = idAndQueue.0
             let q = idAndQueue.1
-            q.async { [unowned self] in
+            q.async {
                 self.process(identifier: id)
             }
+        }
+    }
+    
+    deinit {
+        switch self.state {
+        case .stopped, .shuttingDown:
+            ()
+        default:
+            assertionFailure("wrong state \(self.state)")
         }
     }
 }
@@ -177,7 +188,7 @@ public extension BlockingIOThreadPool {
     ///     - eventLoop: The `EventLoop` the returned `EventLoopFuture` will fire on.
     ///     - body: The closure which performs some blocking work to be done on the thread pool.
     /// - returns: The `EventLoopFuture` of `promise` fulfilled with the result (or error) of the passed closure.
-    public func runIfActive<T>(eventLoop: EventLoop, _ body: @escaping () throws -> T) -> EventLoopFuture<T> {
+    func runIfActive<T>(eventLoop: EventLoop, _ body: @escaping () throws -> T) -> EventLoopFuture<T> {
         let promise: EventLoopPromise<T> = eventLoop.newPromise()
         self.submit { shouldRun in
             guard case shouldRun = BlockingIOThreadPool.WorkItemState.active else {

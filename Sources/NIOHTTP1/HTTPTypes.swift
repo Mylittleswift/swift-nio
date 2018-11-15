@@ -246,7 +246,7 @@ private extension String {
         case .string(let string):
             self = string
         case .byteBuffer(let buffer):
-            self = buffer.getString(at: buffer.readerIndex, length: buffer.readableBytes)!
+            self = buffer.getString(at: buffer.readerIndex, length: buffer.readableBytes)! // bytes definitely in buffer
         }
     }
 }
@@ -372,8 +372,8 @@ public struct HTTPResponseHead: Equatable {
 /// - note: This is public to aid in the creation of supplemental HTTP libraries, e.g.
 ///         NIOHTTP2 and NIOHPACK. It is not intended for general use.
 public struct HTTPHeaderIndex {
-    let start: Int
-    let length: Int
+    public let start: Int
+    public let length: Int
 }
 
 /// Struct which holds name, value pairs.
@@ -381,8 +381,8 @@ public struct HTTPHeaderIndex {
 /// - note: This is public to aid in the creation of supplemental HTTP libraries, e.g.
 ///         NIOHTTP2 and NIOHPACK. It is not intended for general use.
 public struct HTTPHeader {
-    let name: HTTPHeaderIndex
-    let value: HTTPHeaderIndex
+    public let name: HTTPHeaderIndex
+    public let value: HTTPHeaderIndex
 }
 
 private extension ByteBuffer {
@@ -786,7 +786,7 @@ public protocol _DeprecateHTTPHeaderIterator: Sequence { }
 extension HTTPHeaders: _DeprecateHTTPHeaderIterator { }
 public extension _DeprecateHTTPHeaderIterator {
   @available(*, deprecated, message: "Please use the HTTPHeaders.Iterator type")
-  public func makeIterator() -> AnyIterator<Element> {
+  func makeIterator() -> AnyIterator<Element> {
     return AnyIterator(makeIterator() as Iterator)
   }
 }
@@ -959,9 +959,9 @@ public enum HTTPMethod: Equatable {
         switch self {
         case .HEAD, .DELETE, .TRACE:
             return .no
-        case .POST, .PUT, .CONNECT, .PATCH:
+        case .POST, .PUT, .PATCH:
             return .yes
-        case .GET, .OPTIONS:
+        case .GET, .CONNECT, .OPTIONS:
             fallthrough
         default:
             return .unlikely
